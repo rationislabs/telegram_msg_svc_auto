@@ -27,12 +27,14 @@ class Settings:
 def load(env: Mapping[str, str] = os.environ, need_chat: bool = True) -> Settings:
     token = env.get("TELEGRAM_BOT_TOKEN", "").strip()
     if not token:
-        raise SystemExit("TELEGRAM_BOT_TOKEN is not set: create a token in @BotFather "
-                         "and put it in .env")
+        raise SystemExit(
+            "TELEGRAM_BOT_TOKEN is not set: create a token in @BotFather and put it in .env"
+        )
     chat_id = env.get("CHAT_ID", "").strip()
     if need_chat and not chat_id:
-        raise SystemExit("CHAT_ID is not set: run `uv run inv chat-id` and put the "
-                         "channel's id in .env")
+        raise SystemExit(
+            "CHAT_ID is not set: run `uv run inv chat-id` and put the channel's id in .env"
+        )
     raw_at = env.get("POST_AT", "07:00")
     try:
         hour, minute = (int(x) for x in raw_at.split(":"))
@@ -47,6 +49,12 @@ def load(env: Mapping[str, str] = os.environ, need_chat: bool = True) -> Setting
     units = env.get("UNITS", "metric")
     if units not in UNITS:
         raise SystemExit(f"UNITS={units!r} must be metric or imperial")
-    return Settings(token=token, chat_id=chat_id, city=env.get("CITY", "Vienna"),
-                    post_at=post_at, tz=tz, units=units,
-                    data_dir=Path(env.get("DATA_DIR", "data")))
+    return Settings(
+        token=token,
+        chat_id=chat_id,
+        city=env.get("CITY", "Vienna"),
+        post_at=post_at,
+        tz=tz,
+        units=units,
+        data_dir=Path(env.get("DATA_DIR", "data")),
+    )

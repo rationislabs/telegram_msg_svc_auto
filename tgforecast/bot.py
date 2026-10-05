@@ -48,8 +48,14 @@ def _seconds(retry_after) -> float:
     return retry_after.total_seconds() if isinstance(retry_after, timedelta) else float(retry_after)
 
 
-async def attempt(sender, settings: Settings, place: fc.Place, http: httpx.AsyncClient,
-                  now: datetime, attempt_no: int) -> tuple[str, float]:
+async def attempt(
+    sender,
+    settings: Settings,
+    place: fc.Place,
+    http: httpx.AsyncClient,
+    now: datetime,
+    attempt_no: int,
+) -> tuple[str, float]:
     path = settings.data_dir / "state.json"
     if not should_post(now, settings.post_at, state.last_posted(path)):
         return "skipped", 0.0
@@ -67,24 +73,31 @@ async def attempt(sender, settings: Settings, place: fc.Place, http: httpx.Async
 
     text = summary.caption(forecast, air, place.label, settings.units, day)
     try:
-        png = chart.render(chart.series(forecast, day),
-                           f"{place.label} · {day:%A} {day.day} {day:%B}",
-                           settings.units, mark_hour=now.hour + now.minute / 60)
+        png = chart.render(
+            chart.series(forecast, day),
+            f"{place.label} · {day:%A} {day.day} {day:%B}",
+            settings.units,
+            mark_hour=now.hour + now.minute / 60,
+        )
     except Exception:  # noqa: BLE001 — a broken chart must not cost the post
         log.exception("chart failed; sending the caption alone")
         png = None
 
     try:
         if png:
-            await sender.send_photo(chat_id=settings.chat_id, photo=png, caption=text,
-                                    parse_mode="HTML")
+            await sender.send_photo(
+                chat_id=settings.chat_id, photo=png, caption=text, parse_mode="HTML"
+            )
         else:
             await sender.send_message(chat_id=settings.chat_id, text=text, parse_mode="HTML")
     except RetryAfter as e:
         return "retry", _seconds(e.retry_after)
     except (BadRequest, Forbidden) as e:  # BadRequest subclasses NetworkError: catch it first
-        log.error("Telegram refused the post (%s). Check CHAT_ID, and that the bot is an "
-                  "admin of the channel with 'Post messages'.", e)
+        log.error(
+            "Telegram refused the post (%s). Check CHAT_ID, and that the bot is an "
+            "admin of the channel with 'Post messages'.",
+            e,
+        )
         return "blocked", 0.0
     except NetworkError as e:  # includes TimedOut
         log.warning("attempt %d: Telegram unreachable (%s)", attempt_no, e)
@@ -101,8 +114,14 @@ def daily_time(settings: Settings) -> time:
 async def _job(context: ContextTypes.DEFAULT_TYPE) -> None:
     data = context.application.bot_data
     attempt_no = context.job.data or 1
-    status, delay = await attempt(context.bot, data["settings"], data["place"], data["http"],
-                                  datetime.now(data["settings"].tz), attempt_no)
+    status, delay = await attempt(
+        context.bot,
+        data["settings"],
+        data["place"],
+        data["http"],
+        datetime.now(data["settings"].tz),
+        attempt_no,
+    )
     if status == "retry":
         if attempt_no < MAX_ATTEMPTS:
             context.job_queue.run_once(_job, when=delay, data=attempt_no + 1, name="retry")
@@ -130,8 +149,7 @@ async def _stop(app: Application) -> None:
 
 
 def build(settings: Settings) -> Application:
-    app = (Application.builder().token(settings.token)
-           .post_init(_start).post_shutdown(_stop).build())
+    app = Application.builder().token(settings.token).post_init(_start).post_shutdown(_stop).build()
     app.bot_data["settings"] = settings
     return app
 
@@ -145,11 +163,16 @@ async def send_now(settings: Settings) -> None:
         now = datetime.now(settings.tz)
         day = now.date()
         await tg.send_photo(
-            chat_id=settings.chat_id, parse_mode="HTML",
+            chat_id=settings.chat_id,
+            parse_mode="HTML",
             caption=summary.caption(forecast, air, place.label, settings.units, day),
-            photo=chart.render(chart.series(forecast, day),
-                               f"{place.label} · {day:%A} {day.day} {day:%B}",
-                               settings.units, mark_hour=now.hour + now.minute / 60))
+            photo=chart.render(
+                chart.series(forecast, day),
+                f"{place.label} · {day:%A} {day.day} {day:%B}",
+                settings.units,
+                mark_hour=now.hour + now.minute / 60,
+            ),
+        )
 
 
 async def _check_token(token: str) -> None:
@@ -160,7 +183,9 @@ async def _check_token(token: str) -> None:
 
 
 def main(argv: list[str]) -> int:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+    )
     logging.getLogger("httpx").setLevel(logging.WARNING)  # its INFO lines carry the token URL
     settings = config.load()
     try:

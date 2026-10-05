@@ -2,8 +2,36 @@ from datetime import date, timedelta
 
 from tgforecast import summary as S
 
-WMO = (0, 1, 2, 3, 45, 48, 51, 53, 55, 56, 57, 61, 63, 65, 66, 67,
-       71, 73, 75, 77, 80, 81, 82, 85, 86, 95, 96, 99)
+WMO = (
+    0,
+    1,
+    2,
+    3,
+    45,
+    48,
+    51,
+    53,
+    55,
+    56,
+    57,
+    61,
+    63,
+    65,
+    66,
+    67,
+    71,
+    73,
+    75,
+    77,
+    80,
+    81,
+    82,
+    85,
+    86,
+    95,
+    96,
+    99,
+)
 DAY = date(2026, 10, 6)
 
 
@@ -19,9 +47,19 @@ def test_every_wmo_code_has_an_emoji_and_wording():
 
 
 def test_aqi_band_edges():
-    for value, band in {0: "Good", 20: "Good", 21: "Fair", 40: "Fair", 41: "Moderate",
-                        60: "Moderate", 61: "Poor", 80: "Poor", 81: "Very poor",
-                        100: "Very poor", 101: "Extremely poor"}.items():
+    for value, band in {
+        0: "Good",
+        20: "Good",
+        21: "Fair",
+        40: "Fair",
+        41: "Moderate",
+        60: "Moderate",
+        61: "Poor",
+        80: "Poor",
+        81: "Very poor",
+        100: "Very poor",
+        101: "Extremely poor",
+    }.items():
         assert S.aqi_band(value) == band, value
 
 
@@ -43,8 +81,10 @@ def test_aqi_line():
     air = {"hourly": {"time": hours(DAY), "european_aqi": [10] * 12 + [41] + [None] * 11}}
     assert S.aqi_line(air, DAY) == "Air: up to AQI 41 · Moderate"
     assert S.aqi_line(None, DAY) == "Air: no reading today"
-    assert S.aqi_line({"hourly": {"time": hours(DAY), "european_aqi": [None] * 24}}, DAY) == \
-        "Air: no reading today"
+    assert (
+        S.aqi_line({"hourly": {"time": hours(DAY), "european_aqi": [None] * 24}}, DAY)
+        == "Air: no reading today"
+    )
 
 
 def test_caption_on_the_recording(fx):

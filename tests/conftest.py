@@ -22,9 +22,10 @@ def routes(fx):
     routes["air"].mock(return_value=httpx.Response(500))."""
     with respx.mock(assert_all_called=False) as router:
         router.get(fc.GEOCODE, name="geocode").mock(
-            return_value=httpx.Response(200, json=fx("geocode_vienna")))
+            return_value=httpx.Response(200, json=fx("geocode_vienna"))
+        )
         router.get(fc.FORECAST, name="forecast").mock(
-            return_value=httpx.Response(200, json=fx("forecast_vienna")))
-        router.get(fc.AIR, name="air").mock(
-            return_value=httpx.Response(200, json=fx("air_vienna")))
+            return_value=httpx.Response(200, json=fx("forecast_vienna"))
+        )
+        router.get(fc.AIR, name="air").mock(return_value=httpx.Response(200, json=fx("air_vienna")))
         yield router

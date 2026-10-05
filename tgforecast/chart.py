@@ -24,24 +24,41 @@ FONT = ["DejaVu Sans"]  # ships with matplotlib, so the image is the same everyw
 def series(forecast: dict, day: date) -> dict:
     shown = forecast["daily"]["time"][day_index(forecast, day)]
     h = forecast["hourly"]
-    by_hour = {int(t[11:13]): (temp, rain) for t, temp, rain in
-               zip(h["time"], h["temperature_2m"], h["precipitation_probability"])
-               if t.startswith(shown)}
+    by_hour = {
+        int(t[11:13]): (temp, rain)
+        for t, temp, rain in zip(
+            h["time"], h["temperature_2m"], h["precipitation_probability"], strict=False
+        )
+        if t.startswith(shown)
+    }
     hours = list(range(24))
     temp = [by_hour.get(x, (None, None))[0] for x in hours]
     rain = [by_hour.get(x, (None, None))[1] for x in hours]
-    known = [(x, t) for x, t in zip(hours, temp) if t is not None]
-    return {"hours": hours, "temp": temp, "rain": rain,
-            "high": max(known, key=lambda p: p[1]) if known else None,
-            "low": min(known, key=lambda p: p[1]) if known else None}
+    known = [(x, t) for x, t in zip(hours, temp, strict=True) if t is not None]
+    return {
+        "hours": hours,
+        "temp": temp,
+        "rain": rain,
+        "high": max(known, key=lambda p: p[1]) if known else None,
+        "low": min(known, key=lambda p: p[1]) if known else None,
+    }
 
 
 def render(data: dict, title: str, units: str, mark_hour: float | None = None) -> bytes:
     u = UNIT_LABELS[units]["temp"]
-    plt.rcParams.update({"font.family": FONT, "font.size": 9, "text.color": INK,
-                         "axes.labelcolor": INK2, "xtick.color": INK2, "ytick.color": INK2})
-    fig, (top, bottom) = plt.subplots(2, 1, figsize=(6.4, 4), dpi=200, sharex=True,
-                                      gridspec_kw={"height_ratios": [3, 2]})
+    plt.rcParams.update(
+        {
+            "font.family": FONT,
+            "font.size": 9,
+            "text.color": INK,
+            "axes.labelcolor": INK2,
+            "xtick.color": INK2,
+            "ytick.color": INK2,
+        }
+    )
+    fig, (top, bottom) = plt.subplots(
+        2, 1, figsize=(6.4, 4), dpi=200, sharex=True, gridspec_kw={"height_ratios": [3, 2]}
+    )
     fig.patch.set_facecolor(SURFACE)
     fig.suptitle(title, fontsize=11, color=INK, x=0.06, ha="left")
     for ax in (top, bottom):
@@ -60,9 +77,16 @@ def render(data: dict, title: str, units: str, mark_hour: float | None = None) -
     for point, where in ((data["high"], "bottom"), (data["low"], "top")):
         if point:
             x, y = point
-            top.annotate(f"{round(y)}{u}", (x, y), textcoords="offset points",
-                         xytext=(0, 6 if where == "bottom" else -6), ha="center",
-                         va=where, fontsize=9, color=INK)
+            top.annotate(
+                f"{round(y)}{u}",
+                (x, y),
+                textcoords="offset points",
+                xytext=(0, 6 if where == "bottom" else -6),
+                ha="center",
+                va=where,
+                fontsize=9,
+                color=INK,
+            )
 
     bottom.set_title("Chance of rain (%)", loc="left", fontsize=9, color=INK2)
     bottom.bar(data["hours"], [r or 0 for r in data["rain"]], color=BARS, width=0.6)

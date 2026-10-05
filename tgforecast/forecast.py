@@ -15,8 +15,11 @@ AIR = "https://air-quality-api.open-meteo.com/v1/air-quality"
 TIMEOUT = 10.0
 UNIT_PARAMS: dict[str, dict[str, str]] = {
     "metric": {},
-    "imperial": {"temperature_unit": "fahrenheit", "wind_speed_unit": "mph",
-                 "precipitation_unit": "inch"},
+    "imperial": {
+        "temperature_unit": "fahrenheit",
+        "wind_speed_unit": "mph",
+        "precipitation_unit": "inch",
+    },
 }
 
 log = logging.getLogger(__name__)
@@ -45,18 +48,25 @@ def geocode_params(name: str) -> dict[str, Any]:
 
 def forecast_params(place: Place, units: str) -> dict[str, Any]:
     return {
-        "latitude": place.latitude, "longitude": place.longitude,
-        "timezone": "auto", "forecast_days": 2,
+        "latitude": place.latitude,
+        "longitude": place.longitude,
+        "timezone": "auto",
+        "forecast_days": 2,
         "hourly": "temperature_2m,precipitation_probability,weather_code",
         "daily": "temperature_2m_min,temperature_2m_max,precipitation_probability_max,"
-                 "wind_speed_10m_max,weather_code",
+        "wind_speed_10m_max,weather_code",
         **UNIT_PARAMS[units],
     }
 
 
 def air_params(place: Place) -> dict[str, Any]:
-    return {"latitude": place.latitude, "longitude": place.longitude,
-            "timezone": "auto", "forecast_days": 1, "hourly": "european_aqi"}
+    return {
+        "latitude": place.latitude,
+        "longitude": place.longitude,
+        "timezone": "auto",
+        "forecast_days": 1,
+        "hourly": "european_aqi",
+    }
 
 
 async def _get_json(http: httpx.AsyncClient, url: str, params: dict[str, Any]) -> dict[str, Any]:
@@ -77,8 +87,9 @@ async def geocode(http: httpx.AsyncClient, name: str) -> Place:
     if not results:
         raise FetchError(f"no place called {name!r}")
     r = results[0]
-    return Place(r["name"], r.get("admin1", ""), r.get("country_code", ""),
-                 r["latitude"], r["longitude"])
+    return Place(
+        r["name"], r.get("admin1", ""), r.get("country_code", ""), r["latitude"], r["longitude"]
+    )
 
 
 async def fetch(http: httpx.AsyncClient, place: Place, units: str) -> tuple[dict, dict | None]:

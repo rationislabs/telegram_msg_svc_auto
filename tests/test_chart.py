@@ -20,10 +20,14 @@ def test_series_is_one_day_of_hours(fx):
 
 
 def test_series_with_no_values():
-    forecast = {"daily": {"time": ["2026-10-06"]},
-                "hourly": {"time": [f"2026-10-06T{h:02d}:00" for h in range(24)],
-                           "temperature_2m": [None] * 24,
-                           "precipitation_probability": [None] * 24}}
+    forecast = {
+        "daily": {"time": ["2026-10-06"]},
+        "hourly": {
+            "time": [f"2026-10-06T{h:02d}:00" for h in range(24)],
+            "temperature_2m": [None] * 24,
+            "precipitation_probability": [None] * 24,
+        },
+    }
     s = chart.series(forecast, date(2026, 10, 6))
     assert s["high"] is None and s["low"] is None
 
@@ -31,12 +35,18 @@ def test_series_with_no_values():
 def test_render_is_a_1280_by_800_png(fx):
     forecast = fx("forecast_vienna")
     day = date.fromisoformat(forecast["daily"]["time"][0])
-    data = chart.render(chart.series(forecast, day), "Vienna · Monday 6 October", "metric",
-                        mark_hour=7.0)
+    data = chart.render(
+        chart.series(forecast, day), "Vienna · Monday 6 October", "metric", mark_hour=7.0
+    )
     assert png_size(data) == (1280, 800)
 
 
 def test_render_survives_an_empty_day():
-    empty = {"hours": list(range(24)), "temp": [None] * 24, "rain": [None] * 24,
-             "high": None, "low": None}
+    empty = {
+        "hours": list(range(24)),
+        "temp": [None] * 24,
+        "rain": [None] * 24,
+        "high": None,
+        "low": None,
+    }
     assert png_size(chart.render(empty, "Nowhere", "imperial")) == (1280, 800)

@@ -12,23 +12,38 @@ from datetime import date
 
 CAPTION_MAX = 1024
 CREDIT = '<a href="https://open-meteo.com/">Weather data by Open-Meteo.com</a>'
-UNIT_LABELS = {"metric": {"temp": "°C", "wind": "km/h"},
-               "imperial": {"temp": "°F", "wind": "mph"}}
+UNIT_LABELS = {"metric": {"temp": "°C", "wind": "km/h"}, "imperial": {"temp": "°F", "wind": "mph"}}
 WET = 50  # % precipitation probability that counts as "rain likely"
 
 # WMO weather interpretation codes, as Open-Meteo documents them.
 WEATHER: dict[int, tuple[str, str]] = {
-    0: ("☀️", "Clear sky"), 1: ("🌤️", "Mainly clear"), 2: ("⛅", "Partly cloudy"),
-    3: ("☁️", "Overcast"), 45: ("🌫️", "Fog"), 48: ("🌫️", "Freezing fog"),
-    51: ("🌦️", "Light drizzle"), 53: ("🌦️", "Drizzle"), 55: ("🌦️", "Dense drizzle"),
-    56: ("🌧️", "Light freezing drizzle"), 57: ("🌧️", "Freezing drizzle"),
-    61: ("🌧️", "Light rain"), 63: ("🌧️", "Rain"), 65: ("🌧️", "Heavy rain"),
-    66: ("🌧️", "Light freezing rain"), 67: ("🌧️", "Freezing rain"),
-    71: ("🌨️", "Light snow"), 73: ("🌨️", "Snow"), 75: ("❄️", "Heavy snow"),
+    0: ("☀️", "Clear sky"),
+    1: ("🌤️", "Mainly clear"),
+    2: ("⛅", "Partly cloudy"),
+    3: ("☁️", "Overcast"),
+    45: ("🌫️", "Fog"),
+    48: ("🌫️", "Freezing fog"),
+    51: ("🌦️", "Light drizzle"),
+    53: ("🌦️", "Drizzle"),
+    55: ("🌦️", "Dense drizzle"),
+    56: ("🌧️", "Light freezing drizzle"),
+    57: ("🌧️", "Freezing drizzle"),
+    61: ("🌧️", "Light rain"),
+    63: ("🌧️", "Rain"),
+    65: ("🌧️", "Heavy rain"),
+    66: ("🌧️", "Light freezing rain"),
+    67: ("🌧️", "Freezing rain"),
+    71: ("🌨️", "Light snow"),
+    73: ("🌨️", "Snow"),
+    75: ("❄️", "Heavy snow"),
     77: ("🌨️", "Snow grains"),
-    80: ("🌦️", "Light showers"), 81: ("🌧️", "Showers"), 82: ("⛈️", "Violent showers"),
-    85: ("🌨️", "Light snow showers"), 86: ("❄️", "Snow showers"),
-    95: ("⛈️", "Thunderstorm"), 96: ("⛈️", "Thunderstorm with hail"),
+    80: ("🌦️", "Light showers"),
+    81: ("🌧️", "Showers"),
+    82: ("⛈️", "Violent showers"),
+    85: ("🌨️", "Light snow showers"),
+    86: ("❄️", "Snow showers"),
+    95: ("⛈️", "Thunderstorm"),
+    96: ("⛈️", "Thunderstorm with hail"),
     99: ("⛈️", "Thunderstorm with heavy hail"),
 }
 
@@ -58,7 +73,7 @@ def day_index(forecast: dict, day: date) -> int:
 
 def _today(times: list[str], values: list, day: date) -> list[tuple[int, object]]:
     prefix = day.isoformat()
-    return [(int(t[11:13]), v) for t, v in zip(times, values) if t.startswith(prefix)]
+    return [(int(t[11:13]), v) for t, v in zip(times, values, strict=False) if t.startswith(prefix)]
 
 
 def rain_window(times: list[str], probs: list, day: date) -> str:
@@ -81,8 +96,11 @@ def rain_window(times: list[str], probs: list, day: date) -> str:
 def aqi_line(air: dict | None, day: date) -> str:
     if not air:
         return "Air: no reading today"
-    values = [v for _, v in _today(air["hourly"]["time"], air["hourly"]["european_aqi"], day)
-              if v is not None]
+    values = [
+        v
+        for _, v in _today(air["hourly"]["time"], air["hourly"]["european_aqi"], day)
+        if v is not None
+    ]
     if not values:
         return "Air: no reading today"
     worst = max(values)
@@ -103,16 +121,22 @@ def caption(forecast: dict, air: dict | None, label: str, units: str, day: date)
         f"{_r(d['temperature_2m_min'][i])}–{_r(d['temperature_2m_max'][i])} {u['temp']} · "
         f"rain chance {_r(d['precipitation_probability_max'][i])} % · "
         f"wind up to {_r(d['wind_speed_10m_max'][i])} {u['wind']}",
-        rain_window(forecast["hourly"]["time"], forecast["hourly"]["precipitation_probability"],
-                    shown),
+        rain_window(
+            forecast["hourly"]["time"], forecast["hourly"]["precipitation_probability"], shown
+        ),
         aqi_line(air, shown),
     ]
     if i + 1 < len(d["time"]):
         p = d["precipitation_probability_max"][i + 1]
-        outlook = (f"showers likely ({p} %)" if p is not None and p >= WET
-                   else weather(d["weather_code"][i + 1])[1].lower())
-        lines.append(f"Tomorrow: {_r(d['temperature_2m_min'][i + 1])}–"
-                     f"{_r(d['temperature_2m_max'][i + 1])} {u['temp']}, {outlook}")
+        outlook = (
+            f"showers likely ({p} %)"
+            if p is not None and p >= WET
+            else weather(d["weather_code"][i + 1])[1].lower()
+        )
+        lines.append(
+            f"Tomorrow: {_r(d['temperature_2m_min'][i + 1])}–"
+            f"{_r(d['temperature_2m_max'][i + 1])} {u['temp']}, {outlook}"
+        )
     lines.append(CREDIT)
     return fit("\n".join(lines))
 

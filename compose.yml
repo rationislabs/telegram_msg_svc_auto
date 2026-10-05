@@ -1,0 +1,12 @@
+# Outbound connections only (Telegram long polling, Open-Meteo): no ports.
+services:
+  bot:
+    build: .
+    image: telegram-msg-svc-auto:local
+    env_file: .env
+    volumes:
+      - data:/data
+    restart: on-failure:3   # a rejected token stops after three tries instead of looping
+
+volumes:
+  data:

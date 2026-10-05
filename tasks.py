@@ -26,8 +26,9 @@ def fixtures(c):
         return data
 
     r = save("geocode_vienna", fc.GEOCODE, fc.geocode_params("Vienna"))["results"][0]
-    vienna = fc.Place(r["name"], r.get("admin1", ""), r.get("country_code", ""),
-                      r["latitude"], r["longitude"])
+    vienna = fc.Place(
+        r["name"], r.get("admin1", ""), r.get("country_code", ""), r["latitude"], r["longitude"]
+    )
     save("forecast_vienna", fc.FORECAST, fc.forecast_params(vienna, "metric"))
     save("air_vienna", fc.AIR, fc.air_params(vienna))
 
@@ -35,6 +36,7 @@ def fixtures(c):
 def _dotenv() -> dict[str, str]:
     """.env as a dict, without printing it."""
     import os
+
     env = dict(os.environ)
     path = ROOT / ".env"
     if path.exists():
@@ -47,6 +49,7 @@ def _dotenv() -> dict[str, str]:
 
 def _token() -> str:
     from tgforecast import config
+
     return config.load(_dotenv(), need_chat=False).token
 
 
@@ -63,8 +66,10 @@ def chat_id(c):
         if chat:
             seen[chat["id"]] = f"{chat.get('type')}: {chat.get('title') or chat.get('username')}"
     if not seen:
-        print("No chats yet. Add the bot to your channel as an admin, post a message there, "
-              "and run this again.")
+        print(
+            "No chats yet. Add the bot to your channel as an admin, post a message there, "
+            "and run this again."
+        )
     for cid, what in seen.items():
         print(f"{cid}\t{what}")
 
@@ -73,3 +78,24 @@ def chat_id(c):
 def send_now(c):
     """Post today's forecast to CHAT_ID now (does not touch the daily schedule)."""
     c.run("uv run python -m tgforecast send-now", env=_dotenv(), pty=True)
+
+
+@task
+def up(c):
+    """Build and start the bot container."""
+    c.run("docker compose up -d --build")
+
+
+@task
+def down(c):
+    c.run("docker compose down")
+
+
+@task
+def test(c):
+    c.run("uv run pytest", pty=True)
+
+
+@task
+def lint(c):
+    c.run("uv run ruff check . && uv run ruff format --check .")

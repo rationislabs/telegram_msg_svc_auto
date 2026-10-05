@@ -13,16 +13,23 @@ SEVEN = time(7, 0)
 VIENNA = fc.Place("Vienna", "Vienna", "AT", 48.2085, 16.3721)
 
 
-@pytest.mark.parametrize("now, last, expected", [
-    (datetime(2026, 10, 6, 6, 59, tzinfo=TZ), None, False),                 # before POST_AT
-    (datetime(2026, 10, 6, 7, 0, tzinfo=TZ), None, True),                   # on time
-    (datetime(2026, 10, 6, 9, 30, tzinfo=TZ), date(2026, 10, 5), True),     # woke up late
-    (datetime(2026, 10, 6, 9, 30, tzinfo=TZ), date(2026, 10, 6), False),    # already posted
-    (datetime(2026, 10, 6, 23, 59, tzinfo=TZ), date(2026, 10, 5), True),    # still the same day
-    (datetime(2026, 10, 7, 0, 0, 30, tzinfo=TZ), date(2026, 10, 5), False),  # new day, too early
-    (datetime(2026, 3, 29, 7, 0, tzinfo=TZ), None, True),                   # clocks go forward
-    (datetime(2026, 10, 25, 7, 0, tzinfo=TZ), None, True),                  # clocks go back
-])
+@pytest.mark.parametrize(
+    "now, last, expected",
+    [
+        (datetime(2026, 10, 6, 6, 59, tzinfo=TZ), None, False),  # before POST_AT
+        (datetime(2026, 10, 6, 7, 0, tzinfo=TZ), None, True),  # on time
+        (datetime(2026, 10, 6, 9, 30, tzinfo=TZ), date(2026, 10, 5), True),  # woke up late
+        (datetime(2026, 10, 6, 9, 30, tzinfo=TZ), date(2026, 10, 6), False),  # already posted
+        (datetime(2026, 10, 6, 23, 59, tzinfo=TZ), date(2026, 10, 5), True),  # still the same day
+        (
+            datetime(2026, 10, 7, 0, 0, 30, tzinfo=TZ),
+            date(2026, 10, 5),
+            False,
+        ),  # new day, too early
+        (datetime(2026, 3, 29, 7, 0, tzinfo=TZ), None, True),  # clocks go forward
+        (datetime(2026, 10, 25, 7, 0, tzinfo=TZ), None, True),  # clocks go back
+    ],
+)
 def test_should_post(now, last, expected):
     assert bot.should_post(now, SEVEN, last) is expected
 
@@ -47,8 +54,9 @@ class FakeBot:
 
 @pytest.fixture
 def settings(tmp_path):
-    return config.load({"TELEGRAM_BOT_TOKEN": "123:abc", "CHAT_ID": "-1001",
-                        "DATA_DIR": str(tmp_path)})
+    return config.load(
+        {"TELEGRAM_BOT_TOKEN": "123:abc", "CHAT_ID": "-1001", "DATA_DIR": str(tmp_path)}
+    )
 
 
 def morning(forecast_fixture) -> datetime:
@@ -76,6 +84,7 @@ async def test_posts_once_then_skips(routes, settings, fx):
 async def test_chart_failure_sends_text_and_marks(routes, settings, fx, monkeypatch):
     def broken(*a, **k):
         raise RuntimeError("no fonts")
+
     monkeypatch.setattr(bot.chart, "render", broken)
     fake = FakeBot()
     assert (await run(fake, settings, morning(fx("forecast_vienna"))))[0] == "posted"
@@ -106,8 +115,7 @@ async def test_network_error_retries(routes, settings, fx):
 
 @pytest.mark.parametrize("given", [30, timedelta(seconds=30)])
 async def test_flood_limit_waits_as_told(routes, settings, fx, given):
-    status, delay = await run(FakeBot(RetryAfter(given)), settings,
-                              morning(fx("forecast_vienna")))
+    status, delay = await run(FakeBot(RetryAfter(given)), settings, morning(fx("forecast_vienna")))
     assert (status, delay) == ("retry", 30.0)
 
 
@@ -128,8 +136,10 @@ def test_rejected_token_stops_cleanly(monkeypatch, capsys, caplog):
     monkeypatch.setenv("CHAT_ID", "-1")
     with respx.mock(assert_all_called=False) as router:
         router.post(url__startswith="https://api.telegram.org/bot123:fake/").mock(
-            return_value=httpx.Response(401, json={"ok": False, "error_code": 401,
-                                                   "description": "Unauthorized"}))
+            return_value=httpx.Response(
+                401, json={"ok": False, "error_code": 401, "description": "Unauthorized"}
+            )
+        )
         assert bot.main([]) == 1
     err = capsys.readouterr().err
     assert "TELEGRAM_BOT_TOKEN rejected" in err and "Traceback" not in err
