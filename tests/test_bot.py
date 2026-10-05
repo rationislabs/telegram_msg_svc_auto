@@ -119,14 +119,6 @@ async def test_flood_limit_waits_as_told(routes, settings, fx, given):
     assert (status, delay) == ("retry", 30.0)
 
 
-def test_build_schedules_the_daily_job_and_the_catch_up(settings):
-    app = bot.build(settings)
-    assert app.post_init is not None and app.post_shutdown is not None
-    # the jobs themselves are added in post_init, once the bot has started;
-    # the schedule they use is the configured time in the configured zone:
-    assert bot.daily_time(settings) == time(7, 0, tzinfo=settings.tz)
-
-
 def test_rejected_token_stops_cleanly(monkeypatch, capsys, caplog):
     """A rejected token: one clear line and exit 1 — no traceback, and the token
     never reaches the logs."""

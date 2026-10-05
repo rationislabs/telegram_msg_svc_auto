@@ -26,8 +26,8 @@ read in the notification, and a chart of today's temperature and chance of rain.
    docker compose up -d --build
    ```
 
-It posts at `POST_AT` in `TZ`. If the machine was asleep then, it posts as soon as it is back,
-the same day, once.
+It posts at `POST_AT` in `TZ`. If the machine was asleep then, it posts within a minute of
+waking, the same day, once. After a reboot Docker starts it again (`restart: unless-stopped`).
 
 ## Watching the containers
 
@@ -56,6 +56,8 @@ lazydocker
 - "Telegram refused the post" in the logs: check `CHAT_ID` and that the bot is an admin of the
   channel with Post messages.
 - "TELEGRAM_BOT_TOKEN rejected": make a new token in @BotFather.
+- No network or an unknown `CITY` at start: the bot keeps running and tries again (Telegram with growing
+  pauses up to a minute, the city every minute); the log says which.
 
 ## Development
 

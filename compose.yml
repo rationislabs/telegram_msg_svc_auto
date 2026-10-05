@@ -6,7 +6,7 @@ services:
     env_file: .env
     volumes:
       - data:/data
-    restart: on-failure:3   # a rejected token stops after three tries instead of looping
+    restart: unless-stopped   # back after a reboot; a rejected token says so in the logs
 
 volumes:
   data:
