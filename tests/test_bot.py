@@ -109,3 +109,28 @@ async def test_flood_limit_waits_as_told(routes, settings, fx, given):
     status, delay = await run(FakeBot(RetryAfter(given)), settings,
                               morning(fx("forecast_vienna")))
     assert (status, delay) == ("retry", 30.0)
+
+
+def test_build_schedules_the_daily_job_and_the_catch_up(settings):
+    app = bot.build(settings)
+    assert app.post_init is not None and app.post_shutdown is not None
+    # the jobs themselves are added in post_init, once the bot has started;
+    # the schedule they use is the configured time in the configured zone:
+    assert bot.daily_time(settings) == time(7, 0, tzinfo=settings.tz)
+
+
+def test_rejected_token_stops_cleanly(monkeypatch, capsys, caplog):
+    """A rejected token: one clear line and exit 1 — no traceback, and the token
+    never reaches the logs."""
+    import respx
+
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:fake")
+    monkeypatch.setenv("CHAT_ID", "-1")
+    with respx.mock(assert_all_called=False) as router:
+        router.post(url__startswith="https://api.telegram.org/bot123:fake/").mock(
+            return_value=httpx.Response(401, json={"ok": False, "error_code": 401,
+                                                   "description": "Unauthorized"}))
+        assert bot.main([]) == 1
+    err = capsys.readouterr().err
+    assert "TELEGRAM_BOT_TOKEN rejected" in err and "Traceback" not in err
+    assert "123:fake" not in caplog.text and "123:fake" not in err

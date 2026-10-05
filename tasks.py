@@ -30,3 +30,46 @@ def fixtures(c):
                       r["latitude"], r["longitude"])
     save("forecast_vienna", fc.FORECAST, fc.forecast_params(vienna, "metric"))
     save("air_vienna", fc.AIR, fc.air_params(vienna))
+
+
+def _dotenv() -> dict[str, str]:
+    """.env as a dict, without printing it."""
+    import os
+    env = dict(os.environ)
+    path = ROOT / ".env"
+    if path.exists():
+        for line in path.read_text().splitlines():
+            if "=" in line and not line.lstrip().startswith("#"):
+                k, v = line.split("=", 1)
+                env.setdefault(k.strip(), v.strip())
+    return env
+
+
+def _token() -> str:
+    from tgforecast import config
+    return config.load(_dotenv(), need_chat=False).token
+
+
+@task(name="chat-id")
+def chat_id(c):
+    """List the chats the bot can see. Post once in your channel first."""
+    r = httpx.get(f"https://api.telegram.org/bot{_token()}/getUpdates", timeout=30)
+    if r.status_code == 401:
+        raise SystemExit("TELEGRAM_BOT_TOKEN rejected: create a new one in @BotFather")
+    seen = {}
+    for u in r.json().get("result", []):
+        msg = u.get("channel_post") or u.get("message") or u.get("my_chat_member") or {}
+        chat = msg.get("chat") or {}
+        if chat:
+            seen[chat["id"]] = f"{chat.get('type')}: {chat.get('title') or chat.get('username')}"
+    if not seen:
+        print("No chats yet. Add the bot to your channel as an admin, post a message there, "
+              "and run this again.")
+    for cid, what in seen.items():
+        print(f"{cid}\t{what}")
+
+
+@task(name="send-now")
+def send_now(c):
+    """Post today's forecast to CHAT_ID now (does not touch the daily schedule)."""
+    c.run("uv run python -m tgforecast send-now", env=_dotenv(), pty=True)
