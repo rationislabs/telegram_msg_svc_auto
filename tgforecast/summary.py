@@ -10,6 +10,8 @@ from __future__ import annotations
 import html
 from datetime import date
 
+from . import i18n
+
 CAPTION_MAX = 1024
 CREDIT = '<a href="https://open-meteo.com/">Weather data by Open-Meteo.com</a>'
 UNIT_LABELS = {"metric": {"temp": "°C", "wind": "km/h"}, "imperial": {"temp": "°F", "wind": "mph"}}
@@ -47,19 +49,23 @@ WEATHER: dict[int, tuple[str, str]] = {
     99: ("⛈️", "Thunderstorm with heavy hail"),
 }
 
-# European AQI; each upper edge belongs to its band (20 is Good).
-AQI_BANDS = ((20, "Good"), (40, "Fair"), (60, "Moderate"), (80, "Poor"), (100, "Very poor"))
+# European AQI; each upper edge belongs to its band (20 is Good). Names in i18n.AQI_NAMES.
+AQI_EDGES = (20, 40, 60, 80, 100)
 
 
-def weather(code: int) -> tuple[str, str]:
-    return WEATHER.get(code, ("🌡️", "Unknown"))
+def weather(code: int, lang: str = "en") -> tuple[str, str]:
+    emoji, text = WEATHER.get(code, ("🌡️", "Unknown"))
+    if lang != "en":
+        text = i18n.WEATHER_TEXT[lang].get(code, i18n.t(lang, "unknown"))
+    return emoji, text
 
 
-def aqi_band(value: float) -> str:
-    for upper, name in AQI_BANDS:
+def aqi_band(value: float, lang: str = "en") -> str:
+    names = i18n.AQI_NAMES[lang]
+    for i, upper in enumerate(AQI_EDGES):
         if value <= upper:
-            return name
-    return "Extremely poor"
+            return names[i]
+    return names[-1]
 
 
 def day_index(forecast: dict, day: date) -> int:
@@ -76,7 +82,7 @@ def _today(times: list[str], values: list, day: date) -> list[tuple[int, object]
     return [(int(t[11:13]), v) for t, v in zip(times, values, strict=False) if t.startswith(prefix)]
 
 
-def rain_window(times: list[str], probs: list, day: date) -> str:
+def rain_window(times: list[str], probs: list, day: date, lang: str = "en") -> str:
     """The first run of hours at or above WET %, as 'HH:00–HH:00'."""
     start = end = None
     for hour, p in _today(times, probs, day):
@@ -88,54 +94,90 @@ def rain_window(times: list[str], probs: list, day: date) -> str:
                 break
             end = hour + 1
     if start is None:
-        return "Dry all day"
-    stop = "midnight" if end == 24 else f"{end:02d}:00"
-    return f"Rain likely {start:02d}:00–{stop}"
+        return i18n.t(lang, "dry")
+    stop = i18n.t(lang, "midnight") if end == 24 else f"{end:02d}:00"
+    return i18n.t(lang, "rain_window", start=f"{start:02d}:00", stop=stop)
 
 
-def aqi_line(air: dict | None, day: date) -> str:
+def aqi_line(air: dict | None, day: date, lang: str = "en") -> str:
     if not air:
-        return "Air: no reading today"
+        return i18n.t(lang, "air_none")
     values = [
         v
         for _, v in _today(air["hourly"]["time"], air["hourly"]["european_aqi"], day)
         if v is not None
     ]
     if not values:
-        return "Air: no reading today"
+        return i18n.t(lang, "air_none")
     worst = max(values)
-    return f"Air: up to AQI {round(worst)} · {aqi_band(worst)}"
+    return i18n.t(lang, "air", aqi=round(worst), band=aqi_band(worst, lang))
 
 
 def _r(v) -> str:
     return "–" if v is None else str(round(v))
 
 
-def caption(forecast: dict, air: dict | None, label: str, units: str, day: date) -> str:
+def caption(
+    forecast: dict, air: dict | None, label: str, units: str, day: date, lang: str = "en"
+) -> str:
     d, u = forecast["daily"], UNIT_LABELS[units]
     i = day_index(forecast, day)
     shown = date.fromisoformat(d["time"][i])
     emoji, _ = weather(d["weather_code"][i])
     lines = [
-        f"{emoji} {html.escape(label)} · {shown:%A} {shown.day} {shown:%B}",
+        f"{emoji} {html.escape(label)} · {i18n.date_long(shown, lang)}",
         f"{_r(d['temperature_2m_min'][i])}–{_r(d['temperature_2m_max'][i])} {u['temp']} · "
-        f"rain chance {_r(d['precipitation_probability_max'][i])} % · "
-        f"wind up to {_r(d['wind_speed_10m_max'][i])} {u['wind']}",
+        + i18n.t(lang, "rain_chance", p=_r(d["precipitation_probability_max"][i]))
+        + " · "
+        + i18n.t(lang, "wind_up_to", v=_r(d["wind_speed_10m_max"][i]), unit=u["wind"]),
         rain_window(
-            forecast["hourly"]["time"], forecast["hourly"]["precipitation_probability"], shown
+            forecast["hourly"]["time"],
+            forecast["hourly"]["precipitation_probability"],
+            shown,
+            lang,
         ),
-        aqi_line(air, shown),
+        aqi_line(air, shown, lang),
     ]
     if i + 1 < len(d["time"]):
         p = d["precipitation_probability_max"][i + 1]
-        outlook = (
-            f"showers likely ({p} %)"
-            if p is not None and p >= WET
-            else weather(d["weather_code"][i + 1])[1].lower()
-        )
+        if p is not None and p >= WET:
+            outlook = i18n.t(lang, "showers", p=p)
+        else:
+            outlook = weather(d["weather_code"][i + 1], lang)[1]
+            if lang != "de":  # German nouns keep their capital
+                outlook = outlook.lower()
         lines.append(
-            f"Tomorrow: {_r(d['temperature_2m_min'][i + 1])}–"
-            f"{_r(d['temperature_2m_max'][i + 1])} {u['temp']}, {outlook}"
+            i18n.t(
+                lang,
+                "tomorrow",
+                low=_r(d["temperature_2m_min"][i + 1]),
+                high=_r(d["temperature_2m_max"][i + 1]),
+                unit=u["temp"],
+                outlook=outlook,
+            )
+        )
+    lines.append(CREDIT)
+    return fit("\n".join(lines))
+
+
+def week_caption(forecast: dict, label: str, units: str, lang: str = "en") -> str:
+    """One line per day of the forecast, the place first, the credit last."""
+    d, u = forecast["daily"], UNIT_LABELS[units]
+    lines = [i18n.t(lang, "week_title", label=html.escape(label))]
+    for i, day in enumerate(d["time"]):
+        lines.append(
+            i18n.t(
+                lang,
+                "week_line",
+                day=i18n.week_day(date.fromisoformat(day), lang),
+                emoji=weather(d["weather_code"][i])[0],
+                low=_r(d["temperature_2m_min"][i]),
+                high=_r(d["temperature_2m_max"][i]),
+                unit=u["temp"],
+                p=_r(d["precipitation_probability_max"][i]),
+                w=_r(d["wind_speed_10m_max"][i]),
+                wunit=u["wind"],
+            )
         )
     lines.append(CREDIT)
     return fit("\n".join(lines))

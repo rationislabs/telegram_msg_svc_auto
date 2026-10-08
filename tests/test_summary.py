@@ -1,6 +1,10 @@
 from datetime import date, timedelta
+from pathlib import Path
 
+from tgforecast import i18n
 from tgforecast import summary as S
+
+FIXTURES = Path(__file__).parent / "fixtures"
 
 WMO = (
     0,
@@ -128,3 +132,80 @@ def test_caption_when_tz_day_is_not_in_the_data(fx):
     far = date.fromisoformat(forecast["daily"]["time"][0]) + timedelta(days=5)
     assert S.day_index(forecast, far) == 0
     assert S.caption(forecast, None, "Vienna", "metric", far).split("\n")[0]
+
+
+def test_english_caption_is_unchanged(fx):
+    f, a = fx("forecast_vienna"), fx("air_vienna")
+    day = date.fromisoformat(f["daily"]["time"][0])
+    got = (
+        S.caption(f, a, "Vienna, Vienna, AT", "metric", day)
+        + "\n---\n"
+        + S.caption(f, None, "Vienna", "imperial", day)
+        + "\n"
+    )
+    assert got == (FIXTURES / "caption_vienna_en.txt").read_text()
+
+
+def test_weather_and_bands_in_other_languages():
+    assert S.weather(61, "de") == ("🌧️", "Leichter Regen")
+    assert S.weather(4242, "fr") == ("🌡️", "Inconnu")
+    assert S.aqi_band(41, "fr") == "Dégradé"
+    assert S.aqi_band(101, "es") == "Extremadamente mala"
+
+
+def test_rain_window_and_air_in_german():
+    times = hours(DAY) + hours(DAY + timedelta(days=1))
+    assert S.rain_window(times, [10] * 48, DAY, "de") == "Den ganzen Tag trocken"
+    late = [10] * 21 + [90] * 27
+    assert S.rain_window(times, late, DAY, "de") == "Regen wahrscheinlich 21:00–Mitternacht"
+    assert S.aqi_line(None, DAY, "de") == "Luft: heute kein Messwert"
+
+
+def test_caption_in_german(fx):
+    forecast, air = fx("forecast_vienna"), fx("air_vienna")
+    day = date.fromisoformat(forecast["daily"]["time"][0])
+    lines = S.caption(forecast, air, "Wien, Wien, AT", "metric", day, "de").split("\n")
+    assert i18n.date_long(day, "de") in lines[0]
+    assert "Regenrisiko" in lines[1] and "Wind bis" in lines[1]
+    assert lines[3].startswith("Luft: ") and lines[4].startswith("Morgen: ")
+    assert lines[-1] == S.CREDIT
+
+
+def test_tomorrow_outlook_keeps_german_capitals(fx):
+    forecast = fx("forecast_vienna")
+    forecast["daily"]["precipitation_probability_max"][1] = 0
+    forecast["daily"]["weather_code"][1] = 61
+    day = date.fromisoformat(forecast["daily"]["time"][0])
+    assert (
+        S.caption(forecast, None, "W", "metric", day, "de")
+        .split("\n")[4]
+        .endswith(", Leichter Regen")
+    )
+    assert (
+        S.caption(forecast, None, "W", "metric", day, "en").split("\n")[4].endswith(", light rain")
+    )
+
+
+def test_week_caption(fx):
+    forecast = fx("forecast_vienna_week")
+    lines = S.week_caption(forecast, "Vienna, Vienna, AT", "metric").split("\n")
+    assert lines[0] == "Vienna, Vienna, AT · next 7 days"
+    assert len(lines) == 9 and lines[-1] == S.CREDIT
+    first = date.fromisoformat(forecast["daily"]["time"][0])
+    assert lines[1].startswith(i18n.week_day(first, "en") + " · ")
+    assert "°C" in lines[1] and "km/h" in lines[1] and "rain " in lines[1]
+
+
+def test_week_caption_imperial_italian_and_escaped(fx):
+    forecast = fx("forecast_vienna_week")
+    text = S.week_caption(forecast, "A & <B>", "imperial", "it")
+    assert text.startswith("A &amp; &lt;B&gt; · prossimi 7 giorni")
+    assert "°F" in text and "mph" in text and "pioggia" in text
+
+
+def test_week_caption_with_missing_values(fx):
+    forecast = fx("forecast_vienna_week")
+    for key in ("temperature_2m_min", "precipitation_probability_max", "weather_code"):
+        forecast["daily"][key][2] = None
+    line = S.week_caption(forecast, "V", "metric").split("\n")[3]
+    assert "🌡️ –" in line and "rain – %" in line
