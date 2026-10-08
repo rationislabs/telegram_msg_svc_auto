@@ -102,16 +102,17 @@ async def geocode(http: httpx.AsyncClient, name: str) -> Place:
 async def search(
     http: httpx.AsyncClient, name: str, qualifier: str = "", language: str = "en"
 ) -> Place:
-    """Up to ten matches, names in `language`. A qualifier ("Texas", "US", "France") picks the
-    first match whose state, country code or country it names; otherwise the first match."""
+    """Up to ten matches, names in `language`. A qualifier ("Texas", "US", "Texas, US") picks the
+    first match whose state, country code or country name every comma part; otherwise the first match."""
     params = {**geocode_params(name), "count": 10, "language": language}
     results = (await _get_json(http, GEOCODE, params)).get("results") or []
     if not results:
         raise NotFound(f"no place called {name!r}")
-    q = qualifier.casefold()
-    if q:
+    parts = [p for p in (x.strip().casefold() for x in qualifier.split(",")) if p]
+    if parts:
         for r in results:
-            if q in {str(r.get(k, "")).casefold() for k in ("admin1", "country_code", "country")}:
+            fields = {str(r.get(k, "")).casefold() for k in ("admin1", "country_code", "country")}
+            if all(p in fields for p in parts):
                 return _place(r)
     return _place(results[0])
 

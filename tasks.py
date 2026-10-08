@@ -124,7 +124,7 @@ def fixtures_answer(c):
 @task
 def answer(c):
     """Run the answer bot locally with long polling (ANSWER_BOT_TOKEN from .env). This removes
-    the Render webhook; open the Render service URL once afterwards to set it again."""
+    the Render webhook; restart the Render service afterwards (Manual Deploy → Restart service) to set it again."""
     c.run(
         "uv run python -m tgforecast answer",
         env={**_dotenv(), "RENDER_EXTERNAL_URL": ""},

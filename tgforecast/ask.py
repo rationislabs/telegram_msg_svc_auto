@@ -11,7 +11,8 @@ from dataclasses import dataclass
 from . import i18n
 
 MAX_CITY = 100
-IMPERIAL = {"°f", "f", "fahrenheit", "imperial"}
+IMPERIAL = {"°f", "ºf", "f", "fahrenheit", "imperial"}
+METRIC = {"°c", "ºc", "c", "celsius", "metric"}
 
 # command name → (kind, language it replies in; None = the sender's)
 COMMANDS: dict[str, tuple[str, str | None]] = {"start": ("help", None)}
@@ -52,7 +53,9 @@ def parse(text: str, language_code: str | None, private: bool, bot_username: str
 def _city(kind: str, lang: str, rest: str) -> Ask:
     words = rest.split()
     units = "metric"
-    if words and words[-1].casefold() in IMPERIAL:
+    if words and words[-1].casefold() in METRIC:
+        words = words[:-1]
+    elif words and words[-1].casefold() in IMPERIAL:
         units, words = "imperial", words[:-1]
     if not words:
         return Ask("help", lang)

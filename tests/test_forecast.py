@@ -83,6 +83,19 @@ async def test_search_qualifier_picks_the_match(routes, fx):
     assert miss == first
 
 
+async def test_search_multi_part_qualifier(routes, fx):
+    routes["geocode"].mock(return_value=httpx.Response(200, json=fx("geocode_paris")))
+    async with httpx.AsyncClient() as http:
+        a = await fc.search(http, "Paris", "Texas, US")
+        b = await fc.search(http, "Paris", "texas,us")
+        c = await fc.search(http, "Paris", "Texas, FR")
+        d = await fc.search(http, "Paris", "France")
+    for r in (a, b):
+        assert r.admin1 == "Texas" and r.country_code == "US"
+    assert c.country_code == "FR" and c.admin1 != "Texas"
+    assert d.country_code == "FR"
+
+
 async def test_search_with_no_result_is_not_found(routes):
     routes["geocode"].mock(return_value=httpx.Response(200, json={}))
     async with httpx.AsyncClient() as http:

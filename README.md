@@ -84,7 +84,7 @@ memory.
 2. On [Render](https://render.com): New → Blueprint → this repository. Render reads `render.yaml`,
    creates one free web service, and generates `WEBHOOK_SECRET`.
 3. Paste the token into `ANSWER_BOT_TOKEN` when Render asks for it.
-4. In Telegram, send `/now Vienna` and `/woche Wien`.
+4. In Telegram, send `/now Vienna` and `/woche Wien` to the new bot.
 
 Free services sleep after 15 minutes without traffic. A message wakes the service, so the first
 reply after a pause takes about a minute. Deploys wait for CI to pass.
@@ -93,8 +93,8 @@ reply after a pause takes about a minute. Deploys wait for CI to pass.
 
     uv run inv answer      # long polling with ANSWER_BOT_TOKEN from .env
 
-Polling removes the Render webhook. Afterwards, open the Render service's URL once in a browser:
-the service wakes, and on start it registers the webhook again.
+Polling removes the Render webhook. Afterwards, restart the service in Render's dashboard
+(Manual Deploy → Restart service); on start it registers the webhook again.
 
 ## Data
 
