@@ -1,9 +1,12 @@
+import logging
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
 import httpx
 import pytest
+from telegram.error import Forbidden
 
-from tgforecast import chart, i18n
+from tgforecast import answer, chart, i18n
 from tgforecast.answer import Answerer, Reply, Throttle, TTLCache
 from tgforecast.ask import Ask
 
@@ -176,3 +179,102 @@ async def test_a_forecast_that_is_not_an_object_is_the_outage_reply(routes):
     async with httpx.AsyncClient() as http:
         r = await Answerer(http).reply(Ask("now", "en", "Vienna"))
     assert r.status == "outage"
+
+
+class FakeBot:
+    username = "WeatherAnswerBot"
+
+    def __init__(self, error: Exception | None = None):
+        self.sent: list[tuple[str, dict]] = []
+        self.error = error
+
+    async def send_photo(self, **kw):
+        if self.error:
+            raise self.error
+        self.sent.append(("photo", kw))
+
+    async def send_message(self, **kw):
+        if self.error:
+            raise self.error
+        self.sent.append(("message", kw))
+
+
+def data_for(http, **throttle):
+    return {"answerer": Answerer(http), "throttle": Throttle(**throttle)}
+
+
+async def test_handle_answers_and_logs_no_text_or_chat(routes, caplog):
+    caplog.set_level(logging.INFO, logger="tgforecast")
+    bot = FakeBot()
+    async with httpx.AsyncClient() as http:
+        await answer.handle(bot, data_for(http), 4242, "/now Vienna", "en", True)
+    kind, kw = bot.sent[0]
+    assert kind == "photo" and kw["chat_id"] == 4242 and kw["parse_mode"] == "HTML"
+    assert "now ok" in caplog.text
+    assert "Vienna" not in caplog.text and "4242" not in caplog.text
+
+
+async def test_handle_ignores_plain_text_in_groups():
+    bot = FakeBot()
+    async with httpx.AsyncClient() as http:
+        await answer.handle(bot, data_for(http), 1, "Vienna", "en", False)
+    assert bot.sent == []
+
+
+async def test_handle_throttles_with_one_note():
+    bot = FakeBot()
+    async with httpx.AsyncClient() as http:
+        data = data_for(http)
+        for _ in range(12):
+            await answer.handle(bot, data, 7, "/help", "en", True)
+    texts = [kw["text"] for _, kw in bot.sent]
+    assert len(texts) == 11 and texts[-1] == i18n.t("en", "throttled")
+
+
+async def test_handle_crash_sends_a_generic_reply_and_logs_only_the_type(caplog):
+    class Broken:
+        async def reply(self, ask):
+            raise RuntimeError("Graz secret detail")
+
+    caplog.set_level(logging.INFO, logger="tgforecast")
+    bot = FakeBot()
+    await answer.handle(
+        bot, {"answerer": Broken(), "throttle": Throttle()}, 9, "/now Graz", "de", True
+    )
+    assert bot.sent[0][1]["text"] == i18n.t("de", "crash")
+    assert "RuntimeError" in caplog.text and "Graz" not in caplog.text
+
+
+async def test_handle_survives_telegram_refusing_the_reply(caplog):
+    bot = FakeBot(error=Forbidden("bot was blocked by the user"))
+    async with httpx.AsyncClient() as http:
+        await answer.handle(bot, data_for(http), 9, "/help", "en", True)
+    assert "Forbidden" in caplog.text
+
+
+async def test_on_message_reads_the_update():
+    bot = FakeBot()
+    async with httpx.AsyncClient() as http:
+        update = SimpleNamespace(
+            effective_message=SimpleNamespace(
+                text="/hilfe", chat_id=5, chat=SimpleNamespace(type="private")
+            ),
+            effective_user=SimpleNamespace(language_code="en"),
+        )
+        context = SimpleNamespace(bot=bot, application=SimpleNamespace(bot_data=data_for(http)))
+        await answer.on_message(update, context)
+    assert bot.sent[0][1]["text"] == i18n.help_text("de")
+
+
+def test_menus_per_language():
+    menus = dict(answer.menus())
+    assert set(menus) == {None, "de", "it", "fr", "es"}
+    assert [c for c, _ in menus["de"]] == ["jetzt", "woche", "hilfe"]
+    assert [c for c, _ in menus[None]] == ["now", "week", "help"]
+    assert all(1 <= len(d) <= 256 for m in menus.values() for _, d in m)
+
+
+def test_configure_logging_quiets_the_libraries_that_log_the_token():
+    answer.configure_logging()
+    for name in ("httpx", "telegram"):
+        assert logging.getLogger(name).level == logging.WARNING

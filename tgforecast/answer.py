@@ -7,16 +7,25 @@ from __future__ import annotations
 
 import html
 import logging
+import os
+import sys
 import time
 from collections import OrderedDict, deque
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 
-import httpx
+# Opt in to python-telegram-bot's future behaviour, as bot.py does, before telegram is imported.
+os.environ.setdefault("PTB_TIMEDELTA", "1")
 
-from . import chart, i18n, summary
-from . import forecast as fc
-from .ask import Ask
+import httpx  # noqa: E402
+from telegram import LinkPreviewOptions  # noqa: E402
+from telegram.error import InvalidToken, TelegramError  # noqa: E402
+from telegram.ext import Application, ContextTypes, MessageHandler, filters  # noqa: E402
+
+from . import bot as stage1  # noqa: E402
+from . import chart, config, i18n, summary  # noqa: E402
+from . import forecast as fc  # noqa: E402
+from .ask import Ask, parse  # noqa: E402
 
 log = logging.getLogger(__name__)
 
@@ -152,3 +161,136 @@ class Answerer:
             mark_hour=local.hour + local.minute / 60,
             lang=ask.lang,
         )
+
+
+NO_PREVIEW = LinkPreviewOptions(is_disabled=True)
+WEBHOOK_PATH = "telegram"
+
+
+async def send(bot, chat_id: int, reply: Reply) -> None:
+    if reply.photo:
+        await bot.send_photo(
+            chat_id=chat_id, photo=reply.photo, caption=reply.text, parse_mode="HTML"
+        )
+    else:
+        await bot.send_message(
+            chat_id=chat_id, text=reply.text, parse_mode="HTML", link_preview_options=NO_PREVIEW
+        )
+
+
+async def handle(
+    bot, data: dict, chat_id: int, text: str, language_code: str | None, private: bool
+) -> None:
+    ask = parse(text, language_code, private, bot.username)
+    if ask is None:
+        return
+    gate = data["throttle"].check(chat_id)
+    if gate == "quiet":
+        return
+    if gate == "note":
+        reply = Reply(i18n.t(ask.lang, "throttled"), status="throttled")
+    else:
+        try:
+            reply = await data["answerer"].reply(ask)
+        except Exception as e:  # noqa: BLE001 — every question gets an answer
+            log.error("%s crashed: %s", ask.kind, type(e).__name__)
+            reply = Reply(i18n.t(ask.lang, "crash"), status="crash")
+    try:
+        await send(bot, chat_id, reply)
+    except TelegramError as e:  # RetryAfter included: dropped, a sleeping free host does not queue
+        log.warning("%s %s: reply not delivered (%s)", ask.kind, reply.status, type(e).__name__)
+        return
+    log.info("%s %s", ask.kind, reply.status)
+
+
+async def on_message(update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    msg = update.effective_message
+    if msg is None or not msg.text:
+        return
+    user = update.effective_user
+    await handle(
+        context.bot,
+        context.application.bot_data,
+        msg.chat_id,
+        msg.text,
+        user.language_code if user else None,
+        msg.chat.type == "private",
+    )
+
+
+async def on_error(update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # python-telegram-bot's default handler would log the update, which holds the message text.
+    log.error("unhandled %s", type(context.error).__name__)
+
+
+def menus() -> list[tuple[str | None, list[tuple[str, str]]]]:
+    """The command menu per app language; English is the default for everyone else."""
+    out = []
+    for lang in i18n.LANGS:
+        now, week, help_ = i18n.COMMANDS[lang]
+        out.append(
+            (
+                None if lang == "en" else lang,
+                [
+                    (now, i18n.t(lang, "cmd_now")),
+                    (week, i18n.t(lang, "cmd_week")),
+                    (help_, i18n.t(lang, "cmd_help")),
+                ],
+            )
+        )
+    return out
+
+
+async def _start(app: Application) -> None:
+    http = httpx.AsyncClient()
+    app.bot_data.update(http=http, answerer=Answerer(http), throttle=Throttle())
+    for code, commands in menus():
+        try:
+            await app.bot.set_my_commands(commands, language_code=code)
+        except TelegramError as e:
+            log.warning("command menu %s not set: %s", code or "default", type(e).__name__)
+
+
+async def _stop(app: Application) -> None:
+    if http := app.bot_data.get("http"):
+        await http.aclose()
+
+
+def build(settings: config.AnswerSettings) -> Application:
+    app = Application.builder().token(settings.token).post_init(_start).post_shutdown(_stop).build()
+    app.add_handler(MessageHandler(filters.TEXT, on_message))
+    app.add_error_handler(on_error)
+    return app
+
+
+def configure_logging() -> None:
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+    )
+    for name in ("httpx", "telegram"):  # their INFO lines carry the token URL
+        logging.getLogger(name).setLevel(logging.WARNING)
+
+
+def main() -> int:
+    configure_logging()
+    settings = config.load_answer()
+    try:
+        stage1.wait_for_telegram(settings.token)
+        app = build(settings)
+        if settings.webhook_url:
+            app.run_webhook(
+                listen="0.0.0.0",
+                port=settings.port,
+                url_path=WEBHOOK_PATH,
+                webhook_url=f"{settings.webhook_url}/{WEBHOOK_PATH}",
+                secret_token=settings.secret,
+                allowed_updates=["message"],
+                drop_pending_updates=False,  # the message that woke the service gets its answer
+            )
+        else:
+            log.info("no RENDER_EXTERNAL_URL: long polling (this removes any webhook)")
+            app.run_polling(allowed_updates=["message"])
+    except InvalidToken:
+        print("ANSWER_BOT_TOKEN rejected: create a new one in @BotFather", file=sys.stderr)
+        return 1
+    return 0

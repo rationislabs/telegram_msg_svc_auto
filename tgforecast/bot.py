@@ -239,6 +239,21 @@ async def _check_token(token: str) -> None:
         pass
 
 
+def wait_for_telegram(token: str) -> None:
+    """getMe until Telegram answers: no network at boot (Wi-Fi not up yet) means wait, never die.
+    A rejected token raises InvalidToken."""
+    for n in range(10**9):
+        try:
+            asyncio.run(_check_token(token))
+            return
+        except InvalidToken:
+            raise
+        except NetworkError as e:
+            wait = STARTUP_BACKOFF[min(n, len(STARTUP_BACKOFF) - 1)]
+            log.warning("Telegram unreachable at start (%s); trying again in %d s", e, wait)
+            time_module.sleep(wait)
+
+
 def main(argv: list[str]) -> int:
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
@@ -246,16 +261,7 @@ def main(argv: list[str]) -> int:
     logging.getLogger("httpx").setLevel(logging.WARNING)  # its INFO lines carry the token URL
     settings = config.load()
     try:
-        for n in range(10**9):  # no network at boot (Wi-Fi not up yet): wait, never die
-            try:
-                asyncio.run(_check_token(settings.token))
-                break
-            except InvalidToken:
-                raise
-            except NetworkError as e:
-                wait = STARTUP_BACKOFF[min(n, len(STARTUP_BACKOFF) - 1)]
-                log.warning("Telegram unreachable at start (%s); trying again in %d s", e, wait)
-                time_module.sleep(wait)
+        wait_for_telegram(settings.token)
         if argv[:1] == ["send-now"]:
             asyncio.run(send_now(settings))
             return 0

@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Daily weather forecast to a Telegram channel: caption plus a matplotlib chart"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-  "python-telegram-bot[job-queue]>=22.8,<23",
+  "python-telegram-bot[job-queue,webhooks]>=22.8,<23",
   "matplotlib>=3.11,<4",
   "httpx>=0.28,<1",
   "tzdata>=2025.1",

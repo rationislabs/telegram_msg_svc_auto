@@ -151,3 +151,19 @@ def test_startup_network_error_is_retried(monkeypatch, capsys):
         )
         assert bot.main([]) == 0
     assert started == [1]
+
+
+def test_wait_for_telegram_retries_then_returns(monkeypatch):
+    from telegram.error import NetworkError
+
+    calls, slept = [], []
+
+    async def flaky(token):
+        calls.append(token)
+        if len(calls) < 3:
+            raise NetworkError("down")
+
+    monkeypatch.setattr(bot, "_check_token", flaky)
+    monkeypatch.setattr(bot.time_module, "sleep", slept.append)
+    bot.wait_for_telegram("123:abc")
+    assert len(calls) == 3 and slept == [5, 10]

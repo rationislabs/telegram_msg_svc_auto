@@ -3,6 +3,7 @@ one line that fixes it, rather than failing at 07:00."""
 
 from __future__ import annotations
 
+import hashlib
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -58,3 +59,40 @@ def load(env: Mapping[str, str] = os.environ, need_chat: bool = True) -> Setting
         units=units,
         data_dir=Path(env.get("DATA_DIR", "data")),
     )
+
+
+@dataclass(frozen=True)
+class AnswerSettings:
+    token: str = field(repr=False)
+    webhook_url: str  # "" → long polling (local runs)
+    secret: str = field(repr=False)  # what Telegram sends back in its secret-token header
+    port: int
+
+
+def load_answer(env: Mapping[str, str] = os.environ) -> AnswerSettings:
+    token = env.get("ANSWER_BOT_TOKEN", "").strip()
+    if not token:
+        raise SystemExit(
+            "ANSWER_BOT_TOKEN is not set: create a second bot in @BotFather and put its token "
+            "in .env (local) or in Render's dashboard"
+        )
+    url = env.get("RENDER_EXTERNAL_URL", "").strip().rstrip("/")
+    if url and not url.startswith("https://"):
+        raise SystemExit(f"RENDER_EXTERNAL_URL={url!r} must start with https://")
+    raw = env.get("WEBHOOK_SECRET", "").strip()
+    if url and not raw:
+        raise SystemExit(
+            "WEBHOOK_SECRET is not set: render.yaml generates it; to run locally, leave "
+            "RENDER_EXTERNAL_URL unset"
+        )
+    raw_port = env.get("PORT", "10000")
+    try:
+        port = int(raw_port)
+        if not 1 <= port <= 65535:
+            raise ValueError
+    except ValueError:
+        raise SystemExit(f"PORT={raw_port!r} is not a port number") from None
+    # Telegram allows only A-Z a-z 0-9 _ - in a secret token; Render generates base64.
+    # Hashing turns any value into 64 hex characters.
+    secret = hashlib.sha256(raw.encode()).hexdigest() if raw else ""
+    return AnswerSettings(token=token, webhook_url=url, secret=secret, port=port)

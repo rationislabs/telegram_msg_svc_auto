@@ -1,5 +1,7 @@
 import sys
 
-from .bot import main
+from . import answer, bot
 
-sys.exit(main(sys.argv[1:]))
+if sys.argv[1:2] == ["answer"]:
+    sys.exit(answer.main())
+sys.exit(bot.main(sys.argv[1:]))
