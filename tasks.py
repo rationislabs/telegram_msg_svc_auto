@@ -99,3 +99,23 @@ def test(c):
 @task
 def lint(c):
     c.run("uv run ruff check . && uv run ruff format --check .")
+
+
+@task(name="fixtures-answer")
+def fixtures_answer(c):
+    """Record the answer bot's extra responses: Paris (10 results), Vienna for 7 days,
+    and Auckland (a city whose date runs ahead of Vienna's)."""
+    from tgforecast import forecast as fc
+
+    FIXTURES.mkdir(parents=True, exist_ok=True)
+
+    def save(name: str, url: str, params: dict) -> None:
+        data = httpx.get(url, params=params, timeout=30).raise_for_status().json()
+        (FIXTURES / f"{name}.json").write_text(json.dumps(data, indent=1) + "\n")
+        print(f"wrote tests/fixtures/{name}.json")
+
+    save("geocode_paris", fc.GEOCODE, {**fc.geocode_params("Paris"), "count": 10})
+    vienna = fc.Place("Vienna", "Vienna", "AT", 48.20849, 16.37208)
+    save("forecast_vienna_week", fc.FORECAST, fc.forecast_params(vienna, "metric", days=7))
+    auckland = fc.Place("Auckland", "Auckland", "NZ", -36.84853, 174.76349)
+    save("forecast_auckland", fc.FORECAST, fc.forecast_params(auckland, "metric"))

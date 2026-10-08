@@ -29,6 +29,10 @@ class FetchError(Exception):
     """Open-Meteo did not give a usable answer."""
 
 
+class NotFound(FetchError):
+    """Geocoding found no place with that name."""
+
+
 @dataclass(frozen=True)
 class Place:
     name: str
@@ -46,12 +50,12 @@ def geocode_params(name: str) -> dict[str, Any]:
     return {"name": name, "count": 1, "language": "en", "format": "json"}
 
 
-def forecast_params(place: Place, units: str) -> dict[str, Any]:
+def forecast_params(place: Place, units: str, days: int = 2) -> dict[str, Any]:
     return {
         "latitude": place.latitude,
         "longitude": place.longitude,
         "timezone": "auto",
-        "forecast_days": 2,
+        "forecast_days": days,
         "hourly": "temperature_2m,precipitation_probability,weather_code",
         "daily": "temperature_2m_min,temperature_2m_max,precipitation_probability_max,"
         "wind_speed_10m_max,weather_code",
@@ -82,18 +86,42 @@ async def _get_json(http: httpx.AsyncClient, url: str, params: dict[str, Any]) -
         raise FetchError(f"{url}: response is not JSON") from None
 
 
-async def geocode(http: httpx.AsyncClient, name: str) -> Place:
-    results = (await _get_json(http, GEOCODE, geocode_params(name))).get("results") or []
-    if not results:
-        raise FetchError(f"no place called {name!r}")
-    r = results[0]
+def _place(r: dict[str, Any]) -> Place:
     return Place(
         r["name"], r.get("admin1", ""), r.get("country_code", ""), r["latitude"], r["longitude"]
     )
 
 
-async def fetch(http: httpx.AsyncClient, place: Place, units: str) -> tuple[dict, dict | None]:
-    forecast = await _get_json(http, FORECAST, forecast_params(place, units))
+async def geocode(http: httpx.AsyncClient, name: str) -> Place:
+    results = (await _get_json(http, GEOCODE, geocode_params(name))).get("results") or []
+    if not results:
+        raise NotFound(f"no place called {name!r}")
+    return _place(results[0])
+
+
+async def search(
+    http: httpx.AsyncClient, name: str, qualifier: str = "", language: str = "en"
+) -> Place:
+    """Up to ten matches, names in `language`. A qualifier ("Texas", "US", "France") picks the
+    first match whose state, country code or country it names; otherwise the first match."""
+    params = {**geocode_params(name), "count": 10, "language": language}
+    results = (await _get_json(http, GEOCODE, params)).get("results") or []
+    if not results:
+        raise NotFound(f"no place called {name!r}")
+    q = qualifier.casefold()
+    if q:
+        for r in results:
+            if q in {str(r.get(k, "")).casefold() for k in ("admin1", "country_code", "country")}:
+                return _place(r)
+    return _place(results[0])
+
+
+async def fetch(
+    http: httpx.AsyncClient, place: Place, units: str, days: int = 2, with_air: bool = True
+) -> tuple[dict, dict | None]:
+    forecast = await _get_json(http, FORECAST, forecast_params(place, units, days))
+    if not with_air:
+        return forecast, None
     try:
         air = await _get_json(http, AIR, air_params(place))
     except FetchError as e:
