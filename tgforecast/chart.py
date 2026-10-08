@@ -14,6 +14,7 @@ matplotlib.use("Agg")  # no display in a container
 
 import matplotlib.pyplot as plt  # noqa: E402
 
+from . import i18n  # noqa: E402
 from .summary import UNIT_LABELS, day_index  # noqa: E402
 
 SURFACE, LINE, BARS = "#fcfcfb", "#1c5cab", "#3987e5"
@@ -44,8 +45,8 @@ def series(forecast: dict, day: date) -> dict:
     }
 
 
-def render(data: dict, title: str, units: str, mark_hour: float | None = None) -> bytes:
-    u = UNIT_LABELS[units]["temp"]
+def _figure(title: str):
+    """Stage 1's look: two panels sharing one axis, never two y-axes; 1280×800 at 200 dpi."""
     plt.rcParams.update(
         {
             "font.family": FONT,
@@ -68,10 +69,27 @@ def render(data: dict, title: str, units: str, mark_hour: float | None = None) -
             ax.spines[side].set_visible(False)
         ax.spines["bottom"].set_color(GRID)
         ax.tick_params(length=0)
-        if mark_hour is not None:
+    return fig, top, bottom
+
+
+def _png(fig) -> bytes:
+    fig.subplots_adjust(left=0.06, right=0.98, top=0.86, bottom=0.08, hspace=0.45)
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", facecolor=SURFACE)
+    plt.close(fig)
+    return buf.getvalue()
+
+
+def render(
+    data: dict, title: str, units: str, mark_hour: float | None = None, lang: str = "en"
+) -> bytes:
+    u = UNIT_LABELS[units]["temp"]
+    fig, top, bottom = _figure(title)
+    if mark_hour is not None:
+        for ax in (top, bottom):
             ax.axvline(mark_hour, color=INK2, linewidth=0.8, alpha=0.6)
 
-    top.set_title(f"Temperature ({u})", loc="left", fontsize=9, color=INK2)
+    top.set_title(i18n.t(lang, "chart_temp", unit=u), loc="left", fontsize=9, color=INK2)
     top.plot(data["hours"], data["temp"], color=LINE, linewidth=2)
     top.margins(y=0.2)  # room for the high and low labels inside the panel
     for point, where in ((data["high"], "bottom"), (data["low"], "top")):
@@ -88,14 +106,51 @@ def render(data: dict, title: str, units: str, mark_hour: float | None = None) -
                 color=INK,
             )
 
-    bottom.set_title("Chance of rain (%)", loc="left", fontsize=9, color=INK2)
+    bottom.set_title(i18n.t(lang, "chart_rain"), loc="left", fontsize=9, color=INK2)
     bottom.bar(data["hours"], [r or 0 for r in data["rain"]], color=BARS, width=0.6)
     bottom.set_ylim(0, 100)
     bottom.set_xticks(range(0, 24, 3), [f"{x:02d}:00" for x in range(0, 24, 3)])
     bottom.set_xlim(-0.5, 23.5)
+    return _png(fig)
 
-    fig.subplots_adjust(left=0.06, right=0.98, top=0.86, bottom=0.08, hspace=0.45)
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", facecolor=SURFACE)
-    plt.close(fig)
-    return buf.getvalue()
+
+def week_series(forecast: dict) -> dict:
+    d = forecast["daily"]
+    return {
+        "days": [date.fromisoformat(t) for t in d["time"]],
+        "low": d["temperature_2m_min"],
+        "high": d["temperature_2m_max"],
+        "rain": d["precipitation_probability_max"],
+    }
+
+
+def week_render(data: dict, title: str, units: str, lang: str = "en") -> bytes:
+    """Each day's low–high as a bar with both values labelled; rain chance below."""
+    u = UNIT_LABELS[units]["temp"]
+    fig, top, bottom = _figure(title)
+    x = list(range(len(data["days"])))
+
+    top.set_title(i18n.t(lang, "chart_range", unit=u), loc="left", fontsize=9, color=INK2)
+    for i, low, high in zip(x, data["low"], data["high"], strict=True):
+        if low is None or high is None:
+            continue  # a gap, not a guess
+        top.bar(i, max(high - low, 0.2), bottom=low, color=BARS, width=0.5)
+        for y, dy, va in ((high, 4, "bottom"), (low, -4, "top")):
+            top.annotate(
+                f"{round(y)}{u}",
+                (i, y),
+                textcoords="offset points",
+                xytext=(0, dy),
+                ha="center",
+                va=va,
+                fontsize=9,
+                color=INK,
+            )
+    top.margins(y=0.25)
+
+    bottom.set_title(i18n.t(lang, "chart_rain"), loc="left", fontsize=9, color=INK2)
+    bottom.bar(x, [r or 0 for r in data["rain"]], color=BARS, width=0.5)
+    bottom.set_ylim(0, 100)
+    bottom.set_xticks(x, [i18n.week_day(d, lang) for d in data["days"]])
+    bottom.set_xlim(-0.5, len(x) - 0.5)
+    return _png(fig)
