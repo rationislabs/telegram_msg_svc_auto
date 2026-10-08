@@ -119,3 +119,14 @@ def fixtures_answer(c):
     save("forecast_vienna_week", fc.FORECAST, fc.forecast_params(vienna, "metric", days=7))
     auckland = fc.Place("Auckland", "Auckland", "NZ", -36.84853, 174.76349)
     save("forecast_auckland", fc.FORECAST, fc.forecast_params(auckland, "metric"))
+
+
+@task
+def answer(c):
+    """Run the answer bot locally with long polling (ANSWER_BOT_TOKEN from .env). This removes
+    the Render webhook; open the Render service URL once afterwards to set it again."""
+    c.run(
+        "uv run python -m tgforecast answer",
+        env={**_dotenv(), "RENDER_EXTERNAL_URL": ""},
+        pty=True,
+    )

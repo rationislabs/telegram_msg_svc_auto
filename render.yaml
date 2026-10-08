@@ -1,0 +1,15 @@
+# Render blueprint for the stage 2 answer bot: one free Docker web service.
+# Free web services sleep after 15 idle minutes; a Telegram webhook wakes them (~1 minute).
+services:
+  - type: web
+    name: tgforecast-answer
+    runtime: docker
+    plan: free
+    region: frankfurt
+    dockerCommand: python -m tgforecast answer
+    autoDeployTrigger: checksPass
+    envVars:
+      - key: ANSWER_BOT_TOKEN
+        sync: false # pasted in Render's dashboard, never in the repo
+      - key: WEBHOOK_SECRET
+        generateValue: true

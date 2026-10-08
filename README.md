@@ -67,6 +67,35 @@ uv run inv lint
 uv run inv fixtures  # re-record the Open-Meteo responses the tests use
 ```
 
+## Answer bot (stage 2)
+
+A second bot anyone can ask: `/now Graz`, `/week Paris, Texas`, or just a city in a private chat.
+Add `°F` for Fahrenheit. It replies in English, German, Italian, French or Spanish: a local
+command (`/jetzt`, `/woche`, `/ora`, `/settimana`, `/maintenant`, `/semaine`, `/ahora`, `/semana`)
+picks the language, otherwise the Telegram app's language does.
+
+Nothing about visitors is stored: no files, no database, and the logs name only the command and
+the outcome. A 15-minute forecast cache and a limit of 10 questions a minute per chat live in
+memory.
+
+### Hosting on Render (free)
+
+1. In @BotFather, `/newbot` for the answer bot (keep privacy mode on).
+2. On [Render](https://render.com): New → Blueprint → this repository. Render reads `render.yaml`,
+   creates one free web service, and generates `WEBHOOK_SECRET`.
+3. Paste the token into `ANSWER_BOT_TOKEN` when Render asks for it.
+4. In Telegram, send `/now Vienna` and `/woche Wien`.
+
+Free services sleep after 15 minutes without traffic. A message wakes the service, so the first
+reply after a pause takes about a minute. Deploys wait for CI to pass.
+
+### Running it locally
+
+    uv run inv answer      # long polling with ANSWER_BOT_TOKEN from .env
+
+Polling removes the Render webhook. Afterwards, open the Render service's URL once in a browser:
+the service wakes, and on start it registers the webhook again.
+
 ## Data
 
 [Weather data by Open-Meteo.com](https://open-meteo.com/), licensed
