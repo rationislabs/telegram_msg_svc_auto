@@ -63,6 +63,37 @@ def test_date_long(lang, text):
     assert i18n.date_long(date(2026, 10, 6), lang) == text
 
 
+def test_french_first_of_the_month_is_1er():
+    assert i18n.date_long(date(2026, 10, 1), "fr") == "jeudi 1er octobre"
+    assert i18n.date_long(date(2026, 10, 2), "fr") == "vendredi 2 octobre"
+    assert i18n.date_long(date(2026, 10, 1), "es") == "jueves 1 de octubre"
+
+
+def test_proofread_wording():
+    t = i18n.t
+    assert i18n.WEATHER_TEXT["fr"][75] == "Neige forte"
+    assert i18n.WEATHER_TEXT["fr"][55] == "Forte bruine"
+    assert t("it", "air", aqi=41, band="x") == "Aria: fino a un AQI di 41 · x"
+    assert t("fr", "air", aqi=41, band="x") == "Air : jusqu'à un IQA de 41 · x"
+    assert t("es", "air", aqi=41, band="x") == "Aire: hasta un ICA de 41 · x"
+    assert i18n.AQI_NAMES["es"][1] == "Razonablemente buena"
+    assert t("es", "crash") == "Algo salió mal; inténtalo de nuevo."
+    assert t("es", "wind_up_to", v=9, unit="km/h") == "viento de hasta 9 km/h"
+    assert t("it", "unknown_place", name="X") == "Non conosco nessun luogo chiamato «X»."
+    assert t("it", "rain_chance", p=5) == "probabilità di pioggia 5%"
+    assert t("it", "showers", p=5) == "rovesci probabili (5%)"
+    assert t("fr", "chart_range", unit="°C") == "Min. et max. (°C)"
+    assert "pioggia 5% ·" in t(
+        "it", "week_line", day="d", emoji="e", low=1, high=2, unit="u", p=5, w=1, wunit="w"
+    )
+    assert i18n.S["it"]["help"].startswith("Il meteo di qualsiasi città, con i dati di Open-Meteo.")
+    assert i18n.S["fr"]["help"].startswith("La météo de n'importe quelle ville, avec les données")
+    assert "pour un affichage en Fahrenheit" in i18n.S["fr"]["help"]
+    assert "écrire le nom d'une ville" in i18n.S["fr"]["help"]
+    assert "escribir el nombre de una ciudad" in i18n.S["es"]["help"]
+    assert "despertarse primero" in i18n.S["es"]["help"]
+
+
 def test_week_day():
     assert i18n.week_day(date(2026, 10, 12), "en") == "Mon 12"
     assert i18n.week_day(date(2026, 10, 12), "de") == "Mo 12."

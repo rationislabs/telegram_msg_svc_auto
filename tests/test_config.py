@@ -87,6 +87,7 @@ def test_answer_settings_for_local_polling():
     [
         ({}, "ANSWER_BOT_TOKEN"),
         ({**ANSWER, "RENDER_EXTERNAL_URL": "http://answer.onrender.com"}, "https://"),
+        ({**ANSWER, "RENDER_EXTERNAL_URL": "https://"}, "has no host"),
         ({**ANSWER, "WEBHOOK_SECRET": " "}, "WEBHOOK_SECRET"),
         ({**ANSWER, "PORT": "eighty"}, "PORT"),
         ({**ANSWER, "PORT": "70000"}, "PORT"),

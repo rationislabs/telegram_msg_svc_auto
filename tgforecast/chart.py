@@ -13,6 +13,7 @@ import matplotlib
 matplotlib.use("Agg")  # no display in a container
 
 import matplotlib.pyplot as plt  # noqa: E402
+from matplotlib import font_manager  # noqa: E402
 
 from . import i18n  # noqa: E402
 from .summary import UNIT_LABELS, day_index  # noqa: E402
@@ -20,6 +21,11 @@ from .summary import UNIT_LABELS, day_index  # noqa: E402
 SURFACE, LINE, BARS = "#fcfcfb", "#1c5cab", "#3987e5"
 INK, INK2, GRID = "#0b0b0b", "#52514e", "#e1e0d9"
 FONT = ["DejaVu Sans"]  # ships with matplotlib, so the image is the same everywhere
+try:  # place names in CJK titles: DejaVu has no such glyphs; the image installs this font
+    font_manager.findfont("Noto Sans CJK JP", fallback_to_default=False)
+    FONT.append("Noto Sans CJK JP")
+except ValueError:  # not installed: render as before
+    pass
 
 
 def series(forecast: dict, day: date) -> dict:
@@ -146,9 +152,17 @@ def week_render(data: dict, title: str, units: str, lang: str = "en") -> bytes:
                 fontsize=9,
                 color=INK,
             )
-    top.margins(y=0.25)
+    both = [
+        (lo, hi) for lo, hi in zip(data["low"], data["high"], strict=True) if None not in (lo, hi)
+    ]
+    if both:  # room inside the panel for the labels above the highs and below the lows
+        lo, hi = min(b[0] for b in both), max(b[1] for b in both)
+        pad = max(0.15 * (hi - lo), 2)
+        top.set_ylim(lo - pad, hi + pad)
+    top.set_axisbelow(True)  # gridlines behind the bars
 
     bottom.set_title(i18n.t(lang, "chart_rain"), loc="left", fontsize=9, color=INK2)
+    bottom.set_axisbelow(True)
     bottom.bar(x, [r or 0 for r in data["rain"]], color=BARS, width=0.5)
     bottom.set_ylim(0, 100)
     bottom.set_xticks(x, [i18n.week_day(d, lang) for d in data["days"]])

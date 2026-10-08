@@ -98,22 +98,22 @@ S: dict[str, dict[str, str]] = {
     "it": {
         "date_long": "{weekday} {day} {month}",
         "week_day": "{wd} {day}",
-        "rain_chance": "probabilità di pioggia {p} %",
+        "rain_chance": "probabilità di pioggia {p}%",
         "wind_up_to": "vento fino a {v} {unit}",
         "dry": "Asciutto tutto il giorno",
         "rain_window": "Pioggia probabile {start}–{stop}",
         "midnight": "mezzanotte",
         "air_none": "Aria: nessun dato oggi",
-        "air": "Aria: fino a AQI {aqi} · {band}",
+        "air": "Aria: fino a un AQI di {aqi} · {band}",
         "tomorrow": "Domani: {low}–{high} {unit}, {outlook}",
-        "showers": "rovesci probabili ({p} %)",
+        "showers": "rovesci probabili ({p}%)",
         "unknown": "Sconosciuto",
         "week_title": "{label} · prossimi 7 giorni",
-        "week_line": "{day} · {emoji} {low}–{high} {unit} · pioggia {p} % · vento {w} {wunit}",
+        "week_line": "{day} · {emoji} {low}–{high} {unit} · pioggia {p}% · vento {w} {wunit}",
         "chart_temp": "Temperatura ({unit})",
         "chart_rain": "Probabilità di pioggia (%)",
         "chart_range": "Minima e massima ({unit})",
-        "unknown_place": "Non conosco un luogo chiamato «{name}».",
+        "unknown_place": "Non conosco nessun luogo chiamato «{name}».",
         "outage": "Il servizio meteo non risponde in questo momento: riprova tra un minuto.",
         "throttled": "Troppe domande: aspetta un minuto.",
         "bad_city": "Non sembra una città. Prova: /ora Roma",
@@ -122,7 +122,7 @@ S: dict[str, dict[str, str]] = {
         "cmd_week": "I prossimi 7 giorni per una città",
         "cmd_help": "Come usare il bot",
         "help": (
-            "Il meteo di qualsiasi città, da Open-Meteo.\n\n"
+            "Il meteo di qualsiasi città, con i dati di Open-Meteo.\n\n"
             "/ora Roma — oggi, con un grafico\n"
             "/settimana Paris, Texas — i prossimi 7 giorni\n"
             "Aggiungi °F per i gradi Fahrenheit. In una chat privata puoi anche scrivere solo "
@@ -142,7 +142,7 @@ S: dict[str, dict[str, str]] = {
         "rain_window": "Pluie probable {start}–{stop}",
         "midnight": "minuit",
         "air_none": "Air : pas de mesure aujourd'hui",
-        "air": "Air : jusqu'à IQA {aqi} · {band}",
+        "air": "Air : jusqu'à un IQA de {aqi} · {band}",
         "tomorrow": "Demain : {low}–{high} {unit}, {outlook}",
         "showers": "averses probables ({p} %)",
         "unknown": "Inconnu",
@@ -150,7 +150,7 @@ S: dict[str, dict[str, str]] = {
         "week_line": "{day} · {emoji} {low}–{high} {unit} · pluie {p} % · vent {w} {wunit}",
         "chart_temp": "Température ({unit})",
         "chart_rain": "Risque de pluie (%)",
-        "chart_range": "Minimale et maximale ({unit})",
+        "chart_range": "Min. et max. ({unit})",
         "unknown_place": "Je ne connais pas de lieu appelé « {name} ».",
         "outage": "Le service météo ne répond pas pour le moment — réessayez dans une minute.",
         "throttled": "Trop de questions — attendez une minute.",
@@ -160,11 +160,11 @@ S: dict[str, dict[str, str]] = {
         "cmd_week": "Les 7 prochains jours pour une ville",
         "cmd_help": "Comment utiliser ce bot",
         "help": (
-            "La météo de n'importe quelle ville, par Open-Meteo.\n\n"
+            "La météo de n'importe quelle ville, avec les données d'Open-Meteo.\n\n"
             "/maintenant Paris — aujourd'hui, avec un graphique\n"
             "/semaine Paris, Texas — les 7 prochains jours\n"
-            "Ajoutez °F pour des degrés Fahrenheit. En discussion privée, il suffit aussi "
-            "d'écrire le nom d'une ville.\n\n"
+            "Ajoutez °F pour un affichage en Fahrenheit. En discussion privée, vous pouvez aussi "
+            "simplement écrire le nom d'une ville.\n\n"
             "La première réponse après une pause peut prendre environ une minute : le bot doit "
             "d'abord se réveiller.\n"
             "Aucun message ni identifiant n'est conservé.\n"
@@ -176,12 +176,12 @@ S: dict[str, dict[str, str]] = {
         "date_long": "{weekday} {day} de {month}",
         "week_day": "{wd} {day}",
         "rain_chance": "probabilidad de lluvia {p} %",
-        "wind_up_to": "viento hasta {v} {unit}",
+        "wind_up_to": "viento de hasta {v} {unit}",
         "dry": "Seco todo el día",
         "rain_window": "Lluvia probable {start}–{stop}",
         "midnight": "medianoche",
         "air_none": "Aire: sin datos hoy",
-        "air": "Aire: hasta ICA {aqi} · {band}",
+        "air": "Aire: hasta un ICA de {aqi} · {band}",
         "tomorrow": "Mañana: {low}–{high} {unit}, {outlook}",
         "showers": "chubascos probables ({p} %)",
         "unknown": "Desconocido",
@@ -194,7 +194,7 @@ S: dict[str, dict[str, str]] = {
         "outage": "El servicio meteorológico no responde ahora mismo; inténtalo de nuevo en un minuto.",
         "throttled": "Demasiadas preguntas: espera un minuto.",
         "bad_city": "Eso no parece una ciudad. Prueba: /ahora Madrid",
-        "crash": "Algo ha salido mal; inténtalo de nuevo.",
+        "crash": "Algo salió mal; inténtalo de nuevo.",
         "cmd_now": "El tiempo de hoy para una ciudad",
         "cmd_week": "Los próximos 7 días para una ciudad",
         "cmd_help": "Cómo usar este bot",
@@ -203,9 +203,9 @@ S: dict[str, dict[str, str]] = {
             "/ahora Madrid — hoy, con un gráfico\n"
             "/semana Paris, Texas — los próximos 7 días\n"
             "Añade °F para grados Fahrenheit. En un chat privado también basta con escribir "
-            "una ciudad.\n\n"
+            "el nombre de una ciudad.\n\n"
             "La primera respuesta tras una pausa puede tardar alrededor de un minuto: el bot "
-            "tiene que despertarse.\n"
+            "tiene que despertarse primero.\n"
             "No se guarda ningún mensaje ni identificador.\n"
             '¿Quieres usar tu propia IA? Prueba el chatbot en <a href="https://rationis.dev">rationis.dev</a>.'
         ),
@@ -283,7 +283,7 @@ WEATHER_TEXT: dict[str, dict[int, str]] = {
         48: "Brouillard givrant",
         51: "Bruine légère",
         53: "Bruine",
-        55: "Bruine dense",
+        55: "Forte bruine",
         56: "Bruine verglaçante légère",
         57: "Bruine verglaçante",
         61: "Pluie légère",
@@ -293,7 +293,7 @@ WEATHER_TEXT: dict[str, dict[int, str]] = {
         67: "Pluie verglaçante",
         71: "Neige légère",
         73: "Neige",
-        75: "Forte neige",
+        75: "Neige forte",
         77: "Neige en grains",
         80: "Averses légères",
         81: "Averses",
@@ -342,7 +342,14 @@ AQI_NAMES: dict[str, tuple[str, ...]] = {
     "de": ("Sehr gut", "Gut", "Mäßig", "Schlecht", "Sehr schlecht", "Extrem schlecht"),
     "it": ("Buona", "Discreta", "Moderata", "Scadente", "Molto scadente", "Estremamente scadente"),
     "fr": ("Bon", "Moyen", "Dégradé", "Mauvais", "Très mauvais", "Extrêmement mauvais"),
-    "es": ("Buena", "Razonable", "Regular", "Mala", "Muy mala", "Extremadamente mala"),
+    "es": (
+        "Buena",
+        "Razonablemente buena",
+        "Regular",
+        "Desfavorable",
+        "Muy desfavorable",
+        "Extremadamente desfavorable",
+    ),
 }
 
 WEEKDAYS: dict[str, tuple[str, ...]] = {
@@ -450,7 +457,7 @@ def date_long(day: date, lang: str) -> str:
         lang,
         "date_long",
         weekday=WEEKDAYS[lang][day.weekday()],
-        day=day.day,
+        day="1er" if lang == "fr" and day.day == 1 else day.day,
         month=MONTHS[lang][day.month - 1],
     )
 

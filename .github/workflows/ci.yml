@@ -31,5 +31,7 @@ jobs:
           out=$(docker run --rm -e TELEGRAM_BOT_TOKEN= telegram-msg-svc-auto:ci 2>&1 || true)
           echo "$out" | grep -q "TELEGRAM_BOT_TOKEN is not set"
       - run: |
-          out=$(docker run --rm -e ANSWER_BOT_TOKEN=123:abc -e RENDER_EXTERNAL_URL=https://example.invalid telegram-msg-svc-auto:ci python -m tgforecast answer 2>&1 || true)
+          if out=$(docker run --rm -e ANSWER_BOT_TOKEN=123:abc -e RENDER_EXTERNAL_URL=https://example.invalid telegram-msg-svc-auto:ci python -m tgforecast answer 2>&1); then
+            echo "expected a non-zero exit"; exit 1
+          fi
           echo "$out" | grep -q "WEBHOOK_SECRET is not set"

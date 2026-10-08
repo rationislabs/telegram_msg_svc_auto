@@ -1,6 +1,8 @@
 from datetime import date, timedelta
 from pathlib import Path
 
+import pytest
+
 from tgforecast import i18n
 from tgforecast import summary as S
 
@@ -150,7 +152,7 @@ def test_weather_and_bands_in_other_languages():
     assert S.weather(61, "de") == ("🌧️", "Leichter Regen")
     assert S.weather(4242, "fr") == ("🌡️", "Inconnu")
     assert S.aqi_band(41, "fr") == "Dégradé"
-    assert S.aqi_band(101, "es") == "Extremadamente mala"
+    assert S.aqi_band(101, "es") == "Extremadamente desfavorable"
 
 
 def test_rain_window_and_air_in_german():
@@ -209,3 +211,19 @@ def test_week_caption_with_missing_values(fx):
         forecast["daily"][key][2] = None
     line = S.week_caption(forecast, "V", "metric").split("\n")[3]
     assert "🌡️ –" in line and "rain – %" in line
+
+
+@pytest.mark.parametrize("lang", i18n.LANGS)
+def test_captions_in_every_language_are_complete(fx, lang):
+    forecast, air, week = fx("forecast_vienna"), fx("air_vienna"), fx("forecast_vienna_week")
+    day = date.fromisoformat(forecast["daily"]["time"][0])
+    for text in (
+        S.caption(forecast, air, "Vienna", "metric", day, lang),
+        S.week_caption(week, "Vienna", "metric", lang),
+    ):
+        assert text.endswith(S.CREDIT) and len(text) <= S.CAPTION_MAX and "{" not in text
+
+
+def test_a_huge_label_is_cut_and_the_credit_stays(fx):
+    text = S.week_caption(fx("forecast_vienna_week"), "V" * 2000, "metric")
+    assert len(text) <= S.CAPTION_MAX and text.endswith(S.CREDIT)

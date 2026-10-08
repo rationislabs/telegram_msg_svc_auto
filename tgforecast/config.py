@@ -9,6 +9,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import time
 from pathlib import Path
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 UNITS = ("metric", "imperial")
@@ -76,9 +77,12 @@ def load_answer(env: Mapping[str, str] = os.environ) -> AnswerSettings:
             "ANSWER_BOT_TOKEN is not set: create a second bot in @BotFather and put its token "
             "in .env (local) or in Render's dashboard"
         )
-    url = env.get("RENDER_EXTERNAL_URL", "").strip().rstrip("/")
-    if url and not url.startswith("https://"):
+    raw_url = env.get("RENDER_EXTERNAL_URL", "").strip()
+    url = raw_url.rstrip("/")
+    if url and not raw_url.startswith("https://"):
         raise SystemExit(f"RENDER_EXTERNAL_URL={url!r} must start with https://")
+    if url and not urlsplit(url).hostname:
+        raise SystemExit(f"RENDER_EXTERNAL_URL={raw_url!r} has no host")
     raw = env.get("WEBHOOK_SECRET", "").strip()
     if url and not raw:
         raise SystemExit(

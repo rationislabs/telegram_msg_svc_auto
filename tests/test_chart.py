@@ -71,10 +71,33 @@ def test_week_render_is_a_1280_by_800_png(fx):
         )
 
 
-def test_week_render_survives_missing_values():
+def test_week_render_survives_missing_values(monkeypatch):
+    bars = []
+    real = chart.plt.Axes.bar
+    monkeypatch.setattr(
+        chart.plt.Axes, "bar", lambda ax, x, *a, **k: bars.append(x) or real(ax, x, *a, **k)
+    )
     days = [date(2026, 10, 12 + i) for i in range(7)]
-    data = {"days": days, "low": [None] * 7, "high": [5, None, 7, 8, 9, 10, 11], "rain": [None] * 7}
+    data = {"days": days, "low": [1, None, 3, 4, 5, 6, None], "high": [5, None, 7, 8, 9, 10, 11]}
+    data["rain"] = [None] * 7
     assert png_size(chart.week_render(data, "x", "imperial")) == (1280, 800)
+    # range bars take a scalar x; the rain bars below take a list
+    assert [b for b in bars if not isinstance(b, list)] == [0, 2, 3, 4, 5]
+    # no day with both values: nothing to size the panel by, and no crash
+    data["low"] = [None] * 7
+    assert png_size(chart.week_render(data, "x", "imperial")) == (1280, 800)
+
+
+def test_week_render_leaves_room_below_the_lowest_low(monkeypatch):
+    seen = {}
+    real = chart._png
+    monkeypatch.setattr(chart, "_png", lambda fig: seen.update(top=fig.axes[0]) or real(fig))
+    days = [date(2026, 10, 12 + i) for i in range(7)]
+    data = {"days": days, "low": [-4, 0, 3, 4, 5, 6, 7], "high": [5, 9, 7, 8, 9, 10, 20]}
+    data["rain"] = [0] * 7
+    chart.week_render(data, "x", "metric")
+    lo, hi = seen["top"].get_ylim()
+    assert lo <= -4 - 2 and hi >= 20 + 2
 
 
 def test_day_chart_in_german_is_still_1280_by_800(fx):
