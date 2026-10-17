@@ -110,7 +110,7 @@ def test_help_names_its_commands_and_the_credits():
     for lang, (now, week, _) in i18n.COMMANDS.items():
         text = i18n.help_text(lang)
         assert f"/{now} " in text and f"/{week} " in text, lang
-        for link in ("open-meteo.com", "geonames.org", "rationis.dev"):
+        for link in ("open-meteo.com", "geonames.org"):
             assert link in text, (lang, link)
 
 

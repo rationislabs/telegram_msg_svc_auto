@@ -55,8 +55,7 @@ S: dict[str, dict[str, str]] = {
             "/week Paris, Texas — the next 7 days\n"
             "Add °F for Fahrenheit. In a private chat you can also just type a city.\n\n"
             "The first reply after a pause can take about a minute: the bot wakes up first.\n"
-            "No messages or ids are stored.\n"
-            'Want to use your own AI? Try the chatbot on <a href="https://rationis.dev">rationis.dev</a>.'
+            "No messages or ids are stored."
         ),
     },
     "de": {
@@ -91,8 +90,7 @@ S: dict[str, dict[str, str]] = {
             "/woche Paris, Texas — die nächsten 7 Tage\n"
             "Mit °F gibt es Fahrenheit. Im privaten Chat genügt auch einfach ein Ortsname.\n\n"
             "Die erste Antwort nach einer Pause kann etwa eine Minute dauern: Der Bot wacht erst auf.\n"
-            "Es werden keine Nachrichten oder IDs gespeichert.\n"
-            'Eigene KI verwenden? Probier den Chatbot auf <a href="https://rationis.dev">rationis.dev</a>.'
+            "Es werden keine Nachrichten oder IDs gespeichert."
         ),
     },
     "it": {
@@ -129,8 +127,7 @@ S: dict[str, dict[str, str]] = {
             "il nome di una città.\n\n"
             "La prima risposta dopo una pausa può richiedere circa un minuto: il bot deve prima "
             "svegliarsi.\n"
-            "Nessun messaggio o ID viene salvato.\n"
-            'Vuoi usare la tua IA? Prova il chatbot su <a href="https://rationis.dev">rationis.dev</a>.'
+            "Nessun messaggio o ID viene salvato."
         ),
     },
     "fr": {
@@ -167,9 +164,7 @@ S: dict[str, dict[str, str]] = {
             "simplement écrire le nom d'une ville.\n\n"
             "La première réponse après une pause peut prendre environ une minute : le bot doit "
             "d'abord se réveiller.\n"
-            "Aucun message ni identifiant n'est conservé.\n"
-            "Vous voulez utiliser votre propre IA ? Essayez le chatbot sur "
-            '<a href="https://rationis.dev">rationis.dev</a>.'
+            "Aucun message ni identifiant n'est conservé."
         ),
     },
     "es": {
@@ -206,8 +201,7 @@ S: dict[str, dict[str, str]] = {
             "el nombre de una ciudad.\n\n"
             "La primera respuesta tras una pausa puede tardar alrededor de un minuto: el bot "
             "tiene que despertarse primero.\n"
-            "No se guarda ningún mensaje ni identificador.\n"
-            '¿Quieres usar tu propia IA? Prueba el chatbot en <a href="https://rationis.dev">rationis.dev</a>.'
+            "No se guarda ningún mensaje ni identificador."
         ),
     },
 }
