@@ -219,6 +219,3 @@ graphify-out/
 .caveman*
 .headroom/
 .worktrees/
-
-# local bot state (state.json)
-data/

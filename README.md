@@ -1,7 +1,7 @@
 # telegram_msg_svc_auto
 
-Every morning, one Telegram post with the day's weather for your city: a short caption you can
-read in the notification, and a chart of today's temperature and chance of rain.
+Every morning, one Telegram post per city with the day's weather: a short caption you can read in
+the notification, and a chart of today's temperature and chance of rain.
 
 <!-- screenshot of a post -->
 
@@ -9,55 +9,68 @@ read in the notification, and a chart of today's temperature and chance of rain.
 
 1. **Get a bot token.** In Telegram, talk to [@BotFather](https://t.me/BotFather): `/newbot`.
    If a token was ever pasted into a chat, `/revoke` it and use the new one.
-2. **Make a private channel** and add the bot as an admin with **Post messages**.
+2. **Pick where it posts.** Press **Start** in the bot's chat to get the posts yourself, or make a
+   private channel and add the bot as an admin with **Post messages**.
 3. Fill in `.env`:
 
    ```bash
    cp .env.example .env && chmod 600 .env   # then paste TELEGRAM_BOT_TOKEN
    uv sync
-   # post any message in the channel, then:
-   uv run inv chat-id                        # copy the channel's id (-100…) into CHAT_ID
+   # press Start, or post any message in the channel, then:
+   uv run inv chat-id                        # copy the id into CHAT_ID
    uv run inv send-now                       # a post right now, to check how it looks
    ```
 
-4. **Run it:**
+## Run it every morning (GitHub Actions)
 
-   ```bash
-   docker compose up -d --build
-   ```
-
-It posts at `POST_AT` in `TZ`. If the machine was asleep then, it posts within a minute of
-waking, the same day, once. After a reboot Docker starts it again (`restart: unless-stopped`).
-
-## Watching the containers
-
-To watch the containers, images, volumes and logs in a terminal UI, run [lazydocker](https://github.com/jesseduffield/lazydocker) (optional):
+`.github/workflows/daily.yml` posts at `POST_AT` with no machine of your own. Put the two secrets
+on the repository; type each one at the hidden prompt, never in a chat:
 
 ```bash
-lazydocker
+gh secret set TELEGRAM_BOT_TOKEN
+gh secret set CHAT_ID
+gh variable set CITY --body "Vienna; Graz"   # optional, like POST_AT, TZ, UNITS, ANSWER_BOT
 ```
 
-## Settings (`.env`)
+"Run workflow" on the Actions tab posts right away. To stop the morning posts and start them again:
+
+```bash
+gh workflow disable daily.yml
+gh workflow enable daily.yml
+```
+
+GitHub starts scheduled runs late at busy times, sometimes by half an hour. The workflow has two
+UTC crons, 05:00 and 06:00, because 07:00 in Vienna is one in summer and the other in winter;
+only the one that is `POST_AT` posts. Another `POST_AT` or `TZ` needs other hours there. In a
+public repository GitHub turns schedules off after 60 days without a commit; enable it again.
+
+## Settings
+
+In `.env` for `inv send-now`; on GitHub as variables (`gh variable set`), except the two secrets.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `TELEGRAM_BOT_TOKEN` | — | From @BotFather. Required. |
-| `CHAT_ID` | — | The channel, from `uv run inv chat-id`. Required. |
-| `CITY` | `Vienna` | Looked up once at start; the log says which place it found. |
+| `TELEGRAM_BOT_TOKEN` | — | From @BotFather. Required; a secret on GitHub. |
+| `CHAT_ID` | — | Where it posts, from `uv run inv chat-id`. Required; a secret on GitHub. |
+| `CITY` | `Vienna` | Up to 10 cities separated by `;`, one post each: `Vienna; Paris, Texas`. |
 | `POST_AT` | `07:00` | When to post, in `TZ`. |
 | `TZ` | `Europe/Vienna` | Time zone for `POST_AT` and for "today". |
 | `UNITS` | `metric` | `metric` or `imperial`. |
+| `ANSWER_BOT` | — | The answer bot's @username; the bot's description points there. |
+
+Each run also sets the bot's description, the text people see before pressing Start: the cities,
+the time, and the answer bot.
 
 ## When something goes wrong
 
-- Open-Meteo down: it retries every 15 minutes, four times, then posts one line saying there is
-  no forecast today.
+A run that didn't post every city fails, and GitHub emails you. The log says why:
+
+- Open-Meteo down: three tries a minute apart, then one line in the chat saying there is no
+  forecast for that city today. The other cities still post.
 - No air-quality data: the post goes out without that line.
-- "Telegram refused the post" in the logs: check `CHAT_ID` and that the bot is an admin of the
-  channel with Post messages.
+- "CITY 'Wienn': no such place": fix the spelling.
+- "Telegram refused the post": check `CHAT_ID`, and that the bot may post there.
 - "TELEGRAM_BOT_TOKEN rejected": make a new token in @BotFather.
-- No network or an unknown `CITY` at start: the bot keeps running and tries again (Telegram with growing
-  pauses up to a minute, the city every minute); the log says which.
 
 ## Development
 
@@ -70,9 +83,13 @@ uv run inv fixtures  # re-record the Open-Meteo responses the tests use
 ## Answer bot (stage 2)
 
 A second bot anyone can ask: `/now Graz`, `/week Paris, Texas`, or just a city in a private chat.
-Add `°F` for Fahrenheit. It replies in English, German, Italian, French or Spanish: a local
-command (`/jetzt`, `/woche`, `/ora`, `/settimana`, `/maintenant`, `/semaine`, `/ahora`, `/semana`)
-picks the language, otherwise the Telegram app's language does.
+Several at once, separated by `;`: `/now Vienna; Graz` answers each, up to 5. Add `°F` for
+Fahrenheit; at the end it counts for every city. Its menu lists the commands, and its
+description says what it does before anyone presses Start.
+
+It replies in English, German, Italian, French or Spanish: a local command (`/jetzt`, `/woche`,
+`/ora`, `/settimana`, `/maintenant`, `/semaine`, `/ahora`, `/semana`) picks the language,
+otherwise the Telegram app's language does.
 
 Nothing about visitors is stored: no files, no database, and the logs name only the command and
 the outcome. A 15-minute forecast cache and a limit of 10 questions a minute per chat live in

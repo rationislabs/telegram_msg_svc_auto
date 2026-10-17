@@ -8,8 +8,6 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 COPY tgforecast ./tgforecast
-RUN mkdir /data && chown app:app /data
-ENV PATH=/app/.venv/bin:$PATH DATA_DIR=/data MPLCONFIGDIR=/tmp/matplotlib
+ENV PATH=/app/.venv/bin:$PATH MPLCONFIGDIR=/tmp/matplotlib
 USER app
-VOLUME ["/data"]
 CMD ["python", "-m", "tgforecast"]

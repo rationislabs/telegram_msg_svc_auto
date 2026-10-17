@@ -1,9 +1,8 @@
-"""When to post, and one attempt at posting. python-telegram-bot only ticks a
-Runner every minute; every rule lives here, where it is tested.
+"""The morning post: one run posts today's forecast for every city in CITY, then exits.
 
-A tick, not a 07:00 job: the scheduler waits on a clock that stops while the
-laptop sleeps, and a job that fires late is dropped. A tick that asks
-`should_post` posts on the first minute after waking, and never twice.
+GitHub Actions starts it from two UTC crons (the clocks change, POST_AT doesn't); `due` keeps the
+one whose scheduled time is POST_AT in TZ. The scheduled time, not the start time: GitHub can
+start a run late, and a late run must neither be skipped nor post twice.
 """
 
 from __future__ import annotations
@@ -13,7 +12,8 @@ import logging
 import os
 import sys
 import time as time_module
-from datetime import date, datetime, time, timedelta
+from datetime import UTC, datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
 # Opt in now to python-telegram-bot's future behaviour (durations as timedelta);
 # _seconds() handles both, and it silences the per-error deprecation warning.
@@ -29,56 +29,98 @@ from telegram.error import (  # noqa: E402
     RetryAfter,
     TelegramError,
 )
-from telegram.ext import Application, ContextTypes  # noqa: E402
 
-from . import chart, config, state, summary  # noqa: E402
+from . import chart, config, summary  # noqa: E402
 from . import forecast as fc  # noqa: E402
 from .config import Settings  # noqa: E402
 
-RETRY_EVERY = 900.0
-MAX_ATTEMPTS = 4
-TICK = 60  # seconds between checks
-NOTICE = "No forecast this morning: Open-Meteo didn't answer. Next try tomorrow."
+TRIES = 3
+RETRY_WAIT = 60  # seconds between tries; the Actions job has a timeout of its own
+NOTICE = "No forecast for {city} this morning: Open-Meteo didn't answer. Next try tomorrow."
 
 log = logging.getLogger(__name__)
 
 
-def should_post(now: datetime, post_at: time, last: date | None) -> bool:
-    """`now` is in the configured TZ. Today, at or after POST_AT, not yet posted."""
-    return last != now.date() and now.time() >= post_at
+def due(schedule: str, now: datetime, post_at: time, tz: ZoneInfo) -> bool:
+    """`schedule` is the cron that started the run ("" when started by hand: always due).
+    Due when the cron's time today, in `tz`, is POST_AT."""
+    if not schedule:
+        return True
+    minute, hour = (int(x) for x in schedule.split()[:2])
+    # ponytail: "today" is the start date; a cron just before midnight UTC that starts after it
+    # would look at the wrong day. Our crons run in the morning.
+    scheduled = now.astimezone(UTC).replace(hour=hour, minute=minute, second=0, microsecond=0)
+    local = scheduled.astimezone(tz)
+    return (local.hour, local.minute) == (post_at.hour, post_at.minute)
+
+
+def descriptions(settings: Settings) -> tuple[str, str]:
+    """(short, long) for the bot's profile: Telegram allows 120 and 512 characters."""
+    at = f"{settings.post_at:%H:%M}"
+    short = f"Morning weather for {', '.join(settings.cities)}, posted daily at {at}."
+    if len(short) > 120:
+        short = f"Morning weather for {len(settings.cities)} cities, posted daily at {at}."
+    long = (
+        f"{short}\n\nIt posts to its owner's chat only: a short caption and a chart of today's "
+        "temperature and chance of rain. Weather data by Open-Meteo.com."
+    )
+    if settings.answer_bot:
+        long += f"\n\nAsk about any city, any time: @{settings.answer_bot}"
+    return short, long
 
 
 def _seconds(retry_after) -> float:
     return retry_after.total_seconds() if isinstance(retry_after, timedelta) else float(retry_after)
 
 
-async def attempt(
-    sender,
-    settings: Settings,
-    place: fc.Place,
-    http: httpx.AsyncClient,
-    now: datetime,
-    attempt_no: int,
-) -> tuple[str, float]:
-    path = settings.data_dir / "state.json"
-    if not should_post(now, settings.post_at, state.last_posted(path)):
-        return "skipped", 0.0
+async def _forecast(http: httpx.AsyncClient, city: str, settings: Settings, day):
+    """Place, forecast and caption, tried TRIES times. A city that doesn't exist isn't retried."""
+    for n in range(1, TRIES + 1):
+        try:
+            place = await fc.geocode(http, city)
+            forecast, air = await fc.fetch(http, place, settings.units)
+            return place, forecast, summary.caption(forecast, air, place.label, settings.units, day)
+        except fc.NotFound:
+            raise
+        except Exception as e:  # noqa: BLE001 — an outage or a malformed answer: retry
+            if n == TRIES:
+                raise
+            log.warning("%s, try %d: %s; again in %d s", city, n, e, RETRY_WAIT)
+            await asyncio.sleep(RETRY_WAIT)
+
+
+async def _send(tg, settings: Settings, text: str, png: bytes | None) -> None:
+    """One flood-limit wait, as Telegram asks, then one more try."""
+    for last in (False, True):
+        try:
+            if png:
+                await tg.send_photo(
+                    chat_id=settings.chat_id, photo=png, caption=text, parse_mode="HTML"
+                )
+            else:
+                await tg.send_message(chat_id=settings.chat_id, text=text, parse_mode="HTML")
+            return
+        except RetryAfter as e:
+            if last:
+                raise
+            await asyncio.sleep(_seconds(e.retry_after))
+
+
+async def post(tg, http: httpx.AsyncClient, settings: Settings, city: str, now: datetime) -> bool:
+    """Today's post for one city. True when it went out."""
     day = now.date()
     try:
-        forecast, air = await fc.fetch(http, place, settings.units)
-        text = summary.caption(forecast, air, place.label, settings.units, day)
-    except Exception as e:  # noqa: BLE001 — an outage or a malformed answer: retry, never crash
-        if attempt_no < MAX_ATTEMPTS:
-            log.warning("attempt %d: %s; retrying in 15 minutes", attempt_no, e)
-            return "retry", RETRY_EVERY
-        log.error("giving up for today after %d attempts: %s", attempt_no, e)
+        place, forecast, text = await _forecast(http, city, settings, day)
+    except fc.NotFound:
+        log.error("CITY %r: no such place; check the spelling", city)
+        return False
+    except Exception as e:  # noqa: BLE001
+        log.error("%s: no forecast after %d tries: %s", city, TRIES, e)
         try:
-            await sender.send_message(chat_id=settings.chat_id, text=NOTICE)
+            await tg.send_message(chat_id=settings.chat_id, text=NOTICE.format(city=city))
         except TelegramError as te:
             log.error("could not send the no-forecast notice either: %s", te)
-        _mark(path, day)
-        return "gave_up", 0.0
-
+        return False
     try:
         png = chart.render(
             chart.series(forecast, day),
@@ -89,144 +131,35 @@ async def attempt(
     except Exception:  # noqa: BLE001 — a broken chart must not cost the post
         log.exception("chart failed; sending the caption alone")
         png = None
-
     try:
-        if png:
-            await sender.send_photo(
-                chat_id=settings.chat_id, photo=png, caption=text, parse_mode="HTML"
-            )
-        else:
-            await sender.send_message(chat_id=settings.chat_id, text=text, parse_mode="HTML")
-    except RetryAfter as e:
-        return "retry", _seconds(e.retry_after)
+        await _send(tg, settings, text, png)
     except (BadRequest, Forbidden) as e:  # BadRequest subclasses NetworkError: catch it first
         log.error(
-            "Telegram refused the post (%s). Check CHAT_ID, and that the bot is an "
-            "admin of the channel with 'Post messages'.",
-            e,
+            "Telegram refused the post (%s). Check CHAT_ID, and that the bot may post there.", e
         )
-        return "blocked", 0.0
-    except NetworkError as e:  # includes TimedOut
-        log.warning("attempt %d: Telegram unreachable (%s)", attempt_no, e)
-        return "retry", RETRY_EVERY
-    except TelegramError as e:  # e.g. the token was revoked while running
+        return False
+    except TelegramError as e:
         log.error("Telegram refused the post: %s", e)
-        return "blocked", 0.0
-    _mark(path, day)
-    log.info("posted the forecast for %s", day)
-    return "posted", 0.0
+        return False
+    log.info("posted the forecast for %s", place.label)
+    return True
 
 
-def _mark(path, day: date) -> None:
-    """A failed state write must not cost a second post: the Runner remembers the
-    day in memory too, so this only logs."""
+async def run(tg, http: httpx.AsyncClient, settings: Settings, now: datetime) -> bool:
+    """Describe the bot, then post every city. True when every city went out."""
+    short, long = descriptions(settings)
     try:
-        state.mark_posted(path, day)
-    except OSError as e:
-        log.error("could not record today's post in %s: %s", path, e)
+        await tg.set_my_short_description(short)
+        await tg.set_my_description(long)
+    except TelegramError as e:  # the profile text must not cost the posts
+        log.warning("description not set: %s", type(e).__name__)
+    results = [await post(tg, http, settings, city, now) for city in settings.cities]
+    return all(results)
 
 
-class Runner:
-    """One day's bookkeeping between ticks: how many attempts, when the next one
-    may run, and whether today is done. The lock makes overlapping ticks wait,
-    so two can never both pass should_post before either marks the day."""
-
-    def __init__(self, settings: Settings, http: httpx.AsyncClient):
-        self.settings, self.http = settings, http
-        self.place: fc.Place | None = None
-        self.lock = asyncio.Lock()
-        self.day: date | None = None
-        self.attempts = 0
-        self.next_try: datetime | None = None
-        self.done = False
-        self.last_problem = ""
-
-    async def tick(self, sender, now: datetime) -> str:
-        async with self.lock:
-            if self.day != now.date():
-                self.day, self.attempts, self.next_try, self.done = now.date(), 0, None, False
-            if self.done:
-                return "done"
-            if self.next_try and now < self.next_try:
-                return "waiting"
-            if self.place is None:
-                try:
-                    self.place = await fc.geocode(self.http, self.settings.city)
-                    log.info(
-                        "posting the forecast for %s at %s %s",
-                        self.place.label,
-                        self.settings.post_at,
-                        self.settings.tz,
-                    )
-                except fc.FetchError as e:
-                    problem = f"CITY={self.settings.city!r}: {e}; trying again every minute"
-                    if problem != self.last_problem:  # once per change, not every minute
-                        log.warning(problem)
-                        self.last_problem = problem
-                    return "waiting"
-            status, delay = await attempt(
-                sender, self.settings, self.place, self.http, now, self.attempts + 1
-            )
-            if status == "retry":
-                self.attempts += 1
-                self.next_try = now + timedelta(seconds=delay)
-                if self.attempts >= MAX_ATTEMPTS:
-                    log.error("no post today: still failing after %d attempts", self.attempts)
-                    self.done = True
-            elif status in ("posted", "gave_up", "blocked"):
-                self.done = True
-            return status
-
-
-async def _tick(context: ContextTypes.DEFAULT_TYPE) -> None:
-    runner: Runner = context.application.bot_data["runner"]
-    await runner.tick(context.bot, datetime.now(runner.settings.tz))
-
-
-async def _start(app: Application) -> None:
-    settings: Settings = app.bot_data["settings"]
-    http = httpx.AsyncClient()
-    app.bot_data.update(http=http, runner=Runner(settings, http))
-    # misfire_grace_time None: a tick delayed by suspend still runs on waking.
-    app.job_queue.run_repeating(
-        _tick,
-        interval=TICK,
-        first=1,
-        name="tick",
-        job_kwargs={"misfire_grace_time": None, "coalesce": True},
-    )
-
-
-async def _stop(app: Application) -> None:
-    if http := app.bot_data.get("http"):
-        await http.aclose()
-
-
-def build(settings: Settings) -> Application:
-    app = Application.builder().token(settings.token).post_init(_start).post_shutdown(_stop).build()
-    app.bot_data["settings"] = settings
-    return app
-
-
-async def send_now(settings: Settings) -> None:
-    """Post today's forecast immediately, for checking the look. state.json is
-    not touched, so the scheduled post still goes out."""
+async def _main(settings: Settings) -> bool:
     async with httpx.AsyncClient() as http, Bot(settings.token) as tg:
-        place = await fc.geocode(http, settings.city)
-        forecast, air = await fc.fetch(http, place, settings.units)
-        now = datetime.now(settings.tz)
-        day = now.date()
-        await tg.send_photo(
-            chat_id=settings.chat_id,
-            parse_mode="HTML",
-            caption=summary.caption(forecast, air, place.label, settings.units, day),
-            photo=chart.render(
-                chart.series(forecast, day),
-                f"{place.label} · {day:%A} {day.day} {day:%B}",
-                settings.units,
-                mark_hour=now.hour + now.minute / 60,
-            ),
-        )
+        return await run(tg, http, settings, datetime.now(settings.tz))
 
 
 STARTUP_BACKOFF = (5, 10, 20, 40, 60)  # seconds; then every 60 s until Telegram answers
@@ -255,18 +188,19 @@ def wait_for_telegram(token: str) -> None:
 
 
 def main(argv: list[str]) -> int:
+    """`python -m tgforecast` (or `send-now`): post now, or when SCHEDULE says it's due."""
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )
     logging.getLogger("httpx").setLevel(logging.WARNING)  # its INFO lines carry the token URL
     settings = config.load()
+    schedule = os.environ.get("SCHEDULE", "")
+    if not due(schedule, datetime.now(UTC), settings.post_at, settings.tz):
+        log.info("cron %r is not %s in %s: nothing to do", schedule, settings.post_at, settings.tz)
+        return 0
     try:
         wait_for_telegram(settings.token)
-        if argv[:1] == ["send-now"]:
-            asyncio.run(send_now(settings))
-            return 0
-        build(settings).run_polling()
+        return 0 if asyncio.run(_main(settings)) else 1
     except InvalidToken:
         print("TELEGRAM_BOT_TOKEN rejected: create a new one in @BotFather", file=sys.stderr)
         return 1
-    return 0

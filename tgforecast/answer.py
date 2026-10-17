@@ -113,6 +113,8 @@ class Answerer:
             return Reply(i18n.help_text(lang), status="help")
         if ask.kind == "bad":
             return Reply(i18n.t(lang, "bad_city"), status="bad")
+        if ask.kind == "too_many":
+            return Reply(i18n.t(lang, "too_many"), status="too_many")
         outage = Reply(i18n.t(lang, "outage"), status="outage")
         try:
             place = await self._place(ask)
@@ -193,22 +195,35 @@ async def send(bot, chat_id: int, reply: Reply) -> None:
 async def handle(
     bot, data: dict, chat_id: int, text: str, language_code: str | None, private: bool
 ) -> None:
-    kind, lang = "message", "en"  # what a crash before parse returns can still be answered in
     try:
-        ask = parse(text, language_code, private, bot.username)
-        if ask is None:
+        asks = parse(text, language_code, private, bot.username)
+    except Exception as e:  # noqa: BLE001 — every question gets an answer
+        log.error("message crashed: %s", type(e).__name__)
+        await _deliver(bot, chat_id, "message", Reply(i18n.t("en", "crash"), status="crash"))
+        return
+    for ask in asks:  # one reply per city; each city counts against the throttle
+        if not await _answer(bot, data, chat_id, ask):
             return
-        kind, lang = ask.kind, ask.lang
+
+
+async def _answer(bot, data: dict, chat_id: int, ask: Ask) -> bool:
+    """Reply to one Ask. False once the throttle has gone quiet: the rest of the list is dropped."""
+    try:
         gate = data["throttle"].check(chat_id)
         if gate == "quiet":
-            return
+            return False
         if gate == "note":
-            reply = Reply(i18n.t(lang, "throttled"), status="throttled")
+            reply = Reply(i18n.t(ask.lang, "throttled"), status="throttled")
         else:
             reply = await data["answerer"].reply(ask)
     except Exception as e:  # noqa: BLE001 — every question gets an answer
-        log.error("%s crashed: %s", kind, type(e).__name__)
-        reply = Reply(i18n.t(lang, "crash"), status="crash")
+        log.error("%s crashed: %s", ask.kind, type(e).__name__)
+        reply = Reply(i18n.t(ask.lang, "crash"), status="crash")
+    await _deliver(bot, chat_id, ask.kind, reply)
+    return reply.status != "throttled"
+
+
+async def _deliver(bot, chat_id: int, kind: str, reply: Reply) -> None:
     try:
         await send(bot, chat_id, reply)
     except TelegramError as e:  # RetryAfter included: dropped, a sleeping free host does not queue
@@ -255,6 +270,15 @@ def menus() -> list[tuple[str | None, list[tuple[str, str]]]]:
     return out
 
 
+def descriptions() -> list[tuple[str | None, str, str]]:
+    """(language, short, long) for the bot's profile and its empty chat: what a visitor reads
+    before pressing Start. Plain text; English is the default."""
+    return [
+        (None if lang == "en" else lang, i18n.t(lang, "about_short"), i18n.t(lang, "help"))
+        for lang in i18n.LANGS
+    ]
+
+
 async def _start(app: Application) -> None:
     http = httpx.AsyncClient()
     app.bot_data.update(http=http, answerer=Answerer(http), throttle=Throttle())
@@ -263,6 +287,12 @@ async def _start(app: Application) -> None:
             await app.bot.set_my_commands(commands, language_code=code)
         except TelegramError as e:
             log.warning("command menu %s not set: %s", code or "default", type(e).__name__)
+    for code, short, long in descriptions():
+        try:
+            await app.bot.set_my_short_description(short, language_code=code)
+            await app.bot.set_my_description(long, language_code=code)
+        except TelegramError as e:
+            log.warning("description %s not set: %s", code or "default", type(e).__name__)
 
 
 async def _stop(app: Application) -> None:

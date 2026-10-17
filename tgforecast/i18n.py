@@ -46,6 +46,8 @@ S: dict[str, dict[str, str]] = {
         "throttled": "Too many questions — wait a minute.",
         "bad_city": "That doesn't look like a city. Try: /now Vienna",
         "crash": "Something went wrong — try again.",
+        "too_many": "Up to 5 cities at once, separated by ;",
+        "about_short": "Weather for any city: today with a chart, or the next 7 days. Nothing about you is stored.",
         "cmd_now": "Today's weather for a city",
         "cmd_week": "The next 7 days for a city",
         "cmd_help": "How to use this bot",
@@ -53,6 +55,7 @@ S: dict[str, dict[str, str]] = {
             "Weather for any city, from Open-Meteo.\n\n"
             "/now Vienna — today, with a chart\n"
             "/week Paris, Texas — the next 7 days\n"
+            "/now Vienna; Graz — several cities at once (up to 5)\n"
             "Add °F for Fahrenheit. In a private chat you can also just type a city.\n\n"
             "The first reply after a pause can take about a minute: the bot wakes up first.\n"
             "No messages or ids are stored."
@@ -81,6 +84,8 @@ S: dict[str, dict[str, str]] = {
         "throttled": "Zu viele Fragen – warte eine Minute.",
         "bad_city": "Das sieht nicht nach einem Ort aus. Versuch: /jetzt Wien",
         "crash": "Da ist etwas schiefgegangen – versuch es noch einmal.",
+        "too_many": "Bis zu 5 Orte auf einmal, getrennt durch ;",
+        "about_short": "Wetter für jeden Ort: heute mit Diagramm oder die nächsten 7 Tage. Über dich wird nichts gespeichert.",
         "cmd_now": "Das Wetter heute für einen Ort",
         "cmd_week": "Die nächsten 7 Tage für einen Ort",
         "cmd_help": "So funktioniert der Bot",
@@ -88,6 +93,7 @@ S: dict[str, dict[str, str]] = {
             "Wetter für jeden Ort, von Open-Meteo.\n\n"
             "/jetzt Wien — heute, mit Diagramm\n"
             "/woche Paris, Texas — die nächsten 7 Tage\n"
+            "/jetzt Wien; Graz — mehrere Orte auf einmal (bis zu 5)\n"
             "Mit °F gibt es Fahrenheit. Im privaten Chat genügt auch einfach ein Ortsname.\n\n"
             "Die erste Antwort nach einer Pause kann etwa eine Minute dauern: Der Bot wacht erst auf.\n"
             "Es werden keine Nachrichten oder IDs gespeichert."
@@ -116,6 +122,8 @@ S: dict[str, dict[str, str]] = {
         "throttled": "Troppe domande: aspetta un minuto.",
         "bad_city": "Non sembra una città. Prova: /ora Roma",
         "crash": "Qualcosa è andato storto: riprova.",
+        "too_many": "Al massimo 5 città alla volta, separate da ;",
+        "about_short": "Il meteo di qualsiasi città: oggi con un grafico o i prossimi 7 giorni. Non viene salvato nulla su di te.",
         "cmd_now": "Il meteo di oggi per una città",
         "cmd_week": "I prossimi 7 giorni per una città",
         "cmd_help": "Come usare il bot",
@@ -123,6 +131,7 @@ S: dict[str, dict[str, str]] = {
             "Il meteo di qualsiasi città, con i dati di Open-Meteo.\n\n"
             "/ora Roma — oggi, con un grafico\n"
             "/settimana Paris, Texas — i prossimi 7 giorni\n"
+            "/ora Roma; Milano — più città insieme (fino a 5)\n"
             "Aggiungi °F per i gradi Fahrenheit. In una chat privata puoi anche scrivere solo "
             "il nome di una città.\n\n"
             "La prima risposta dopo una pausa può richiedere circa un minuto: il bot deve prima "
@@ -153,6 +162,8 @@ S: dict[str, dict[str, str]] = {
         "throttled": "Trop de questions — attendez une minute.",
         "bad_city": "Cela ne ressemble pas à une ville. Essayez : /maintenant Paris",
         "crash": "Une erreur s'est produite — réessayez.",
+        "too_many": "Jusqu'à 5 villes à la fois, séparées par ;",
+        "about_short": "La météo de n'importe quelle ville : aujourd'hui avec un graphique ou les 7 prochains jours. Rien n'est conservé.",
         "cmd_now": "La météo du jour pour une ville",
         "cmd_week": "Les 7 prochains jours pour une ville",
         "cmd_help": "Comment utiliser ce bot",
@@ -160,6 +171,7 @@ S: dict[str, dict[str, str]] = {
             "La météo de n'importe quelle ville, avec les données d'Open-Meteo.\n\n"
             "/maintenant Paris — aujourd'hui, avec un graphique\n"
             "/semaine Paris, Texas — les 7 prochains jours\n"
+            "/maintenant Paris; Lyon — plusieurs villes à la fois (jusqu'à 5)\n"
             "Ajoutez °F pour un affichage en Fahrenheit. En discussion privée, vous pouvez aussi "
             "simplement écrire le nom d'une ville.\n\n"
             "La première réponse après une pause peut prendre environ une minute : le bot doit "
@@ -190,6 +202,8 @@ S: dict[str, dict[str, str]] = {
         "throttled": "Demasiadas preguntas: espera un minuto.",
         "bad_city": "Eso no parece una ciudad. Prueba: /ahora Madrid",
         "crash": "Algo salió mal; inténtalo de nuevo.",
+        "too_many": "Hasta 5 ciudades a la vez, separadas por ;",
+        "about_short": "El tiempo de cualquier ciudad: hoy con un gráfico o los próximos 7 días. No se guarda nada sobre ti.",
         "cmd_now": "El tiempo de hoy para una ciudad",
         "cmd_week": "Los próximos 7 días para una ciudad",
         "cmd_help": "Cómo usar este bot",
@@ -197,6 +211,7 @@ S: dict[str, dict[str, str]] = {
             "El tiempo de cualquier ciudad, con datos de Open-Meteo.\n\n"
             "/ahora Madrid — hoy, con un gráfico\n"
             "/semana Paris, Texas — los próximos 7 días\n"
+            "/ahora Madrid; Sevilla — varias ciudades a la vez (hasta 5)\n"
             "Añade °F para grados Fahrenheit. En un chat privado también basta con escribir "
             "el nombre de una ciudad.\n\n"
             "La primera respuesta tras una pausa puede tardar alrededor de un minuto: el bot "

@@ -462,3 +462,54 @@ def test_python_m_tgforecast_answer_needs_its_token():
         [sys.executable, "-m", "tgforecast", "answer"], env=env, capture_output=True, text=True
     )
     assert p.returncode == 1 and "ANSWER_BOT_TOKEN is not set" in p.stderr
+
+
+async def test_handle_answers_each_city_in_a_list(routes, fx):
+    bot = FakeBot()
+    async with httpx.AsyncClient() as http:
+        await answer.handle(bot, data_for(http, fx), 3, "/now Vienna; Vienna, AT", "en", True)
+    assert [kind for kind, _ in bot.sent] == ["photo", "photo"]
+
+
+async def test_handle_says_when_a_list_is_too_long(fx):
+    bot = FakeBot()
+    async with httpx.AsyncClient() as http:
+        await answer.handle(bot, data_for(http, fx), 3, "/now Aa; Bb; Cc; Dd; Ee; Ff", "en", True)
+    assert [kw["text"] for _, kw in bot.sent] == [i18n.t("en", "too_many")]
+
+
+async def test_each_city_counts_against_the_throttle(routes, fx):
+    bot = FakeBot()
+    async with httpx.AsyncClient() as http:
+        data = data_for(http, fx, limit=2)
+        await answer.handle(bot, data, 3, "/now Vienna; Vienna; Vienna; Vienna", "en", True)
+    assert [kind for kind, _ in bot.sent] == ["photo", "photo", "message"]
+    assert bot.sent[-1][1]["text"] == i18n.t("en", "throttled")
+
+
+def test_descriptions_per_language_fit_telegram():
+    found = {code: (short, long) for code, short, long in answer.descriptions()}
+    assert set(found) == {None, "de", "it", "fr", "es"}
+    for short, long in found.values():
+        assert 1 <= len(short) <= 120 and 1 <= len(long) <= 512
+        assert "<" not in short + long  # Telegram shows descriptions as plain text
+
+
+async def test_start_sets_menus_and_descriptions_per_language():
+    calls = set()
+
+    class Bot:
+        async def set_my_commands(self, commands, language_code=None):
+            calls.add(("commands", language_code))
+
+        async def set_my_description(self, description, language_code=None):
+            calls.add(("description", language_code))
+
+        async def set_my_short_description(self, short_description, language_code=None):
+            calls.add(("short", language_code))
+
+    app = SimpleNamespace(bot=Bot(), bot_data={})
+    await answer._start(app)
+    await app.bot_data["http"].aclose()
+    codes = (None, "de", "it", "fr", "es")
+    assert calls == {(k, c) for k in ("commands", "description", "short") for c in codes}

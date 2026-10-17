@@ -1,0 +1,33 @@
+name: Daily post
+# POST_AT 07:00 in Europe/Vienna is 05:00 UTC in summer and 06:00 UTC in winter. Both run; only
+# the one whose time is POST_AT posts (tgforecast.bot.due). A new POST_AT or TZ needs new hours.
+# Off when not wanted: gh workflow disable daily.yml (and enable to turn it back on).
+on:
+  schedule:
+    - cron: "0 5 * * *"
+    - cron: "0 6 * * *"
+  workflow_dispatch: # "Run workflow" posts right away
+
+permissions:
+  contents: read
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          enable-cache: true
+      - run: uv sync --frozen --no-dev
+      - run: uv run --no-sync python -m tgforecast
+        env:
+          SCHEDULE: ${{ github.event.schedule }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+          CITY: ${{ vars.CITY || 'Vienna' }}
+          POST_AT: ${{ vars.POST_AT || '07:00' }}
+          TZ: ${{ vars.TZ || 'Europe/Vienna' }}
+          UNITS: ${{ vars.UNITS || 'metric' }}
+          ANSWER_BOT: ${{ vars.ANSWER_BOT }}

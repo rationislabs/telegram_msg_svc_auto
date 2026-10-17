@@ -64,4 +64,38 @@ BOT = "WeatherAnswerBot"
     ],
 )
 def test_parse(text, lc, private, want):
-    assert parse(text, lc, private, BOT) == want
+    assert parse(text, lc, private, BOT) == ([] if want is None else [want])
+
+
+@pytest.mark.parametrize(
+    "text, want",
+    [
+        ("/now Wien; Graz", [Ask("now", "en", "Wien"), Ask("now", "en", "Graz")]),
+        (
+            "/week Wien;Paris, Texas",
+            [Ask("week", "en", "Wien"), Ask("week", "en", "Paris", "Texas")],
+        ),
+        (  # a trailing unit is for every city
+            "/now Wien; Miami °F",
+            [
+                Ask("now", "en", "Wien", units="imperial"),
+                Ask("now", "en", "Miami", units="imperial"),
+            ],
+        ),
+        (  # a unit inside the list is for its own city
+            "/now Miami °F; Wien",
+            [Ask("now", "en", "Miami", units="imperial"), Ask("now", "en", "Wien")],
+        ),
+        ("/now Wien; ; Graz;", [Ask("now", "en", "Wien"), Ask("now", "en", "Graz")]),
+        ("/now Wien; 123", [Ask("now", "en", "Wien"), Ask("bad", "en")]),
+        ("/now ;", [Ask("help", "en")]),
+        ("Wien; Graz", [Ask("now", "en", "Wien"), Ask("now", "en", "Graz")]),
+        (
+            "/jetzt Aa; Bb; Cc; Dd; Ee",
+            [Ask("now", "de", c) for c in ("Aa", "Bb", "Cc", "Dd", "Ee")],
+        ),
+        ("/jetzt Aa; Bb; Cc; Dd; Ee; Ff", [Ask("too_many", "de")]),
+    ],
+)
+def test_parse_several_cities(text, want):
+    assert parse(text, "en", True, BOT) == want

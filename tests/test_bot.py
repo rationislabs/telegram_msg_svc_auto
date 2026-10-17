@@ -1,131 +1,176 @@
-from datetime import date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 import httpx
 import pytest
-from telegram.error import BadRequest, Forbidden, RetryAfter, TimedOut
+import respx
+from telegram.error import BadRequest, Forbidden, RetryAfter
 
-from tgforecast import bot, config, state
-from tgforecast import forecast as fc
+from tgforecast import bot, config
 
 TZ = ZoneInfo("Europe/Vienna")
 SEVEN = time(7, 0)
-VIENNA = fc.Place("Vienna", "Vienna", "AT", 48.2085, 16.3721)
 
 
 @pytest.mark.parametrize(
-    "now, last, expected",
+    "schedule, now, expected",
     [
-        (datetime(2026, 10, 6, 6, 59, tzinfo=TZ), None, False),  # before POST_AT
-        (datetime(2026, 10, 6, 7, 0, tzinfo=TZ), None, True),  # on time
-        (datetime(2026, 10, 6, 9, 30, tzinfo=TZ), date(2026, 10, 5), True),  # woke up late
-        (datetime(2026, 10, 6, 9, 30, tzinfo=TZ), date(2026, 10, 6), False),  # already posted
-        (datetime(2026, 10, 6, 23, 59, tzinfo=TZ), date(2026, 10, 5), True),  # still the same day
-        (
-            datetime(2026, 10, 7, 0, 0, 30, tzinfo=TZ),
-            date(2026, 10, 5),
-            False,
-        ),  # new day, too early
-        (datetime(2026, 3, 29, 7, 0, tzinfo=TZ), None, True),  # clocks go forward
-        (datetime(2026, 10, 25, 7, 0, tzinfo=TZ), None, True),  # clocks go back
+        ("", datetime(2026, 7, 1, 13, 0, tzinfo=UTC), True),  # by hand: always
+        ("0 5 * * *", datetime(2026, 7, 1, 5, 0, tzinfo=UTC), True),  # summer: 07:00 local
+        ("0 6 * * *", datetime(2026, 7, 1, 6, 0, tzinfo=UTC), False),  # summer: 08:00
+        ("0 5 * * *", datetime(2026, 12, 1, 5, 0, tzinfo=UTC), False),  # winter: 06:00
+        ("0 6 * * *", datetime(2026, 12, 1, 6, 0, tzinfo=UTC), True),  # winter: 07:00
+        ("0 5 * * *", datetime(2026, 7, 1, 5, 40, tzinfo=UTC), True),  # started late: still due
+        ("0 5 * * *", datetime(2026, 12, 1, 6, 10, tzinfo=UTC), False),  # winter, late: not twice
+        ("0 6 * * *", datetime(2026, 3, 29, 6, 0, tzinfo=UTC), False),  # clocks went forward
+        ("0 5 * * *", datetime(2026, 3, 29, 5, 0, tzinfo=UTC), True),
+        ("0 6 * * *", datetime(2026, 10, 25, 6, 0, tzinfo=UTC), True),  # clocks went back
+        ("30 4 * * *", datetime(2026, 7, 1, 4, 30, tzinfo=UTC), False),  # 06:30 local
     ],
 )
-def test_should_post(now, last, expected):
-    assert bot.should_post(now, SEVEN, last) is expected
+def test_due(schedule, now, expected):
+    assert bot.due(schedule, now, SEVEN, TZ) is expected
 
 
 class FakeBot:
-    """Records what would have gone to Telegram; can be told to raise."""
+    """Records what would have gone to Telegram; `errors` are raised by the next sends, in order."""
 
-    def __init__(self, error: Exception | None = None):
+    def __init__(self, *errors: Exception):
         self.sent: list[tuple[str, dict]] = []
-        self.error = error
+        self.about: dict[str, str] = {}
+        self.errors = list(errors)
+
+    async def _send(self, kind, kw):
+        if self.errors:
+            raise self.errors.pop(0)
+        self.sent.append((kind, kw))
 
     async def send_photo(self, **kw):
-        if self.error:
-            raise self.error
-        self.sent.append(("photo", kw))
+        await self._send("photo", kw)
 
     async def send_message(self, **kw):
-        if self.error:
-            raise self.error
-        self.sent.append(("message", kw))
+        await self._send("message", kw)
+
+    async def set_my_short_description(self, short_description):
+        self.about["short"] = short_description
+
+    async def set_my_description(self, description):
+        self.about["long"] = description
 
 
-@pytest.fixture
-def settings(tmp_path):
-    return config.load(
-        {"TELEGRAM_BOT_TOKEN": "123:abc", "CHAT_ID": "-1001", "DATA_DIR": str(tmp_path)}
-    )
+def settings_for(**env):
+    return config.load({"TELEGRAM_BOT_TOKEN": "123:abc", "CHAT_ID": "-1001", **env})
 
 
-def morning(forecast_fixture) -> datetime:
+def morning(fx) -> datetime:
     """07:05 on the recording's first day, so its data is 'today'."""
-    day = date.fromisoformat(forecast_fixture["daily"]["time"][0])
+    day = date.fromisoformat(fx("forecast_vienna")["daily"]["time"][0])
     return datetime.combine(day, time(7, 5), tzinfo=TZ)
 
 
-async def run(sender, settings, now, attempt_no=1):
+@pytest.fixture(autouse=True)
+def no_waiting(monkeypatch):
+    waits = []
+
+    async def sleep(seconds):
+        waits.append(seconds)
+
+    monkeypatch.setattr(bot.asyncio, "sleep", sleep)
+    return waits
+
+
+async def run(tg, settings, now):
     async with httpx.AsyncClient() as http:
-        return await bot.attempt(sender, settings, VIENNA, http, now, attempt_no)
+        return await bot.run(tg, http, settings, now)
 
 
-async def test_posts_once_then_skips(routes, settings, fx):
-    now, fake = morning(fx("forecast_vienna")), FakeBot()
-    assert await run(fake, settings, now) == ("posted", 0.0)
+async def test_posts_one_photo_per_city(routes, fx):
+    fake = FakeBot()
+    assert await run(fake, settings_for(CITY="Vienna; Graz"), morning(fx)) is True
+    assert [kind for kind, _ in fake.sent] == ["photo", "photo"]
     kind, kw = fake.sent[0]
-    assert kind == "photo" and kw["chat_id"] == "-1001" and kw["parse_mode"] == "HTML"
+    assert kw["chat_id"] == "-1001" and kw["parse_mode"] == "HTML"
     assert kw["photo"][:4] == b"\x89PNG" and kw["caption"].endswith("Open-Meteo.com</a>")
-    assert state.last_posted(settings.data_dir / "state.json") == now.date()
-    assert await run(fake, settings, now + timedelta(hours=1)) == ("skipped", 0.0)
-    assert len(fake.sent) == 1
+    asked = [c.request.url.params["name"] for c in routes["geocode"].calls]
+    assert asked == ["Vienna", "Graz"]
 
 
-async def test_chart_failure_sends_text_and_marks(routes, settings, fx, monkeypatch):
+async def test_sets_the_description_from_the_settings(routes, fx):
+    fake = FakeBot()
+    await run(fake, settings_for(CITY="Vienna; Graz", ANSWER_BOT="WeatherAnswerBot"), morning(fx))
+    assert fake.about["short"] == "Morning weather for Vienna, Graz, posted daily at 07:00."
+    assert "@WeatherAnswerBot" in fake.about["long"]
+
+
+def test_descriptions_fit_telegram_with_many_long_cities():
+    s = settings_for(CITY="; ".join(["Llanfairpwllgwyngyll, Wales"] * 10), ANSWER_BOT="b")
+    short, long = bot.descriptions(s)
+    assert len(short) <= 120 and len(long) <= 512
+    assert short == "Morning weather for 10 cities, posted daily at 07:00."
+
+
+async def test_chart_failure_sends_the_caption_alone(routes, fx, monkeypatch):
     def broken(*a, **k):
         raise RuntimeError("no fonts")
 
     monkeypatch.setattr(bot.chart, "render", broken)
     fake = FakeBot()
-    assert (await run(fake, settings, morning(fx("forecast_vienna"))))[0] == "posted"
+    assert await run(fake, settings_for(), morning(fx)) is True
     assert fake.sent[0][0] == "message"
 
 
-async def test_fetch_failure_retries_then_gives_notice(routes, settings, fx):
+async def test_open_meteo_down_retries_then_sends_a_notice_per_city(routes, fx, no_waiting):
     routes["forecast"].mock(return_value=httpx.Response(503))
-    now, fake = morning(fx("forecast_vienna")), FakeBot()
-    assert await run(fake, settings, now, attempt_no=1) == ("retry", bot.RETRY_EVERY)
-    assert fake.sent == [] and state.last_posted(settings.data_dir / "state.json") is None
-    assert await run(fake, settings, now, attempt_no=bot.MAX_ATTEMPTS) == ("gave_up", 0.0)
-    assert fake.sent == [("message", {"chat_id": "-1001", "text": bot.NOTICE})]
-    assert state.last_posted(settings.data_dir / "state.json") == now.date()
+    fake = FakeBot()
+    assert await run(fake, settings_for(CITY="Vienna; Graz"), morning(fx)) is False
+    assert routes["forecast"].call_count == 2 * bot.TRIES
+    assert no_waiting == [bot.RETRY_WAIT] * (2 * (bot.TRIES - 1))
+    assert [kw["text"] for _, kw in fake.sent] == [
+        bot.NOTICE.format(city="Vienna"),
+        bot.NOTICE.format(city="Graz"),
+    ]
 
 
-async def test_wrong_chat_is_not_retried(routes, settings, fx):
-    for error in (BadRequest("Chat not found"), Forbidden("bot is not a member")):
-        status, _ = await run(FakeBot(error), settings, morning(fx("forecast_vienna")))
-        assert status == "blocked", error
-    assert state.last_posted(settings.data_dir / "state.json") is None
+async def test_unknown_city_is_not_retried_and_the_others_still_post(routes, fx, caplog):
+    routes["geocode"].mock(
+        side_effect=[
+            httpx.Response(200, json={"results": []}),
+            httpx.Response(200, json=fx("geocode_vienna")),
+        ]
+    )
+    fake = FakeBot()
+    assert await run(fake, settings_for(CITY="Wienn; Vienna"), morning(fx)) is False
+    assert [kind for kind, _ in fake.sent] == ["photo"]
+    assert "CITY 'Wienn'" in caplog.text
 
 
-async def test_network_error_retries(routes, settings, fx):
-    status, delay = await run(FakeBot(TimedOut()), settings, morning(fx("forecast_vienna")))
-    assert (status, delay) == ("retry", bot.RETRY_EVERY)
+@pytest.mark.parametrize("error", [BadRequest("Chat not found"), Forbidden("not a member")])
+async def test_refused_post_names_the_fix(routes, fx, caplog, error):
+    assert await run(FakeBot(error), settings_for(), morning(fx)) is False
+    assert "Check CHAT_ID" in caplog.text
 
 
 @pytest.mark.parametrize("given", [30, timedelta(seconds=30)])
-async def test_flood_limit_waits_as_told(routes, settings, fx, given):
-    status, delay = await run(FakeBot(RetryAfter(given)), settings, morning(fx("forecast_vienna")))
-    assert (status, delay) == ("retry", 30.0)
+async def test_flood_limit_waits_as_told_then_posts(routes, fx, no_waiting, given):
+    fake = FakeBot(RetryAfter(given))
+    assert await run(fake, settings_for(), morning(fx)) is True
+    assert no_waiting == [30.0] and [kind for kind, _ in fake.sent] == ["photo"]
+
+
+def test_not_due_exits_without_touching_telegram(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:abc")
+    monkeypatch.setenv("CHAT_ID", "-1")
+    monkeypatch.setenv("SCHEDULE", "0 12 * * *")  # 13:00 or 14:00 in Vienna, never 07:00
+    with respx.mock():  # any request would fail the test
+        assert bot.main([]) == 0
 
 
 def test_rejected_token_stops_cleanly(monkeypatch, capsys, caplog):
     """A rejected token: one clear line and exit 1 — no traceback, and the token
     never reaches the logs."""
-    import respx
-
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:fake")
     monkeypatch.setenv("CHAT_ID", "-1")
+    monkeypatch.delenv("SCHEDULE", raising=False)
     with respx.mock(assert_all_called=False) as router:
         router.post(url__startswith="https://api.telegram.org/bot123:fake/").mock(
             return_value=httpx.Response(

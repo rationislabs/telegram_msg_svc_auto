@@ -10,12 +10,12 @@ GOOD = {"TELEGRAM_BOT_TOKEN": "123:abc", "CHAT_ID": "-1001"}
 
 def test_defaults():
     s = config.load(GOOD)
-    assert (s.city, s.post_at, str(s.tz), s.units, str(s.data_dir)) == (
-        "Vienna",
+    assert (s.cities, s.post_at, str(s.tz), s.units, s.answer_bot) == (
+        ("Vienna",),
         time(7, 0),
         "Europe/Vienna",
         "metric",
-        "data",
+        "",
     )
 
 
@@ -27,16 +27,21 @@ def test_overrides():
             "POST_AT": "06:45",
             "TZ": "UTC",
             "UNITS": "imperial",
-            "DATA_DIR": "/data",
+            "ANSWER_BOT": "@WeatherAnswerBot",
         }
     )
-    assert (s.city, s.post_at, str(s.tz), s.units, str(s.data_dir)) == (
-        "Graz",
+    assert (s.cities, s.post_at, str(s.tz), s.units, s.answer_bot) == (
+        ("Graz",),
         time(6, 45),
         "UTC",
         "imperial",
-        "/data",
+        "WeatherAnswerBot",
     )
+
+
+def test_several_cities():
+    s = config.load({**GOOD, "CITY": " Vienna; Graz ;; Paris, Texas ;"})
+    assert s.cities == ("Vienna", "Graz", "Paris, Texas")
 
 
 @pytest.mark.parametrize(
@@ -47,6 +52,8 @@ def test_overrides():
         ({**GOOD, "POST_AT": "7am"}, "POST_AT"),
         ({**GOOD, "TZ": "Mars/Olympus"}, "TZ"),
         ({**GOOD, "UNITS": "kelvin"}, "UNITS"),
+        ({**GOOD, "CITY": " ; "}, "CITY"),
+        ({**GOOD, "CITY": ";".join("abcdefghijk")}, "CITY"),
     ],
 )
 def test_bad_settings_stop_with_the_fix(env, says):

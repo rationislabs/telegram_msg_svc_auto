@@ -8,22 +8,22 @@ import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import time
-from pathlib import Path
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 UNITS = ("metric", "imperial")
+MAX_CITIES = 10
 
 
 @dataclass(frozen=True)
 class Settings:
     token: str = field(repr=False)  # never in logs or tracebacks
     chat_id: str
-    city: str
+    cities: tuple[str, ...]
     post_at: time
     tz: ZoneInfo
     units: str
-    data_dir: Path
+    answer_bot: str  # its @username for the description, or ""
 
 
 def load(env: Mapping[str, str] = os.environ, need_chat: bool = True) -> Settings:
@@ -51,14 +51,20 @@ def load(env: Mapping[str, str] = os.environ, need_chat: bool = True) -> Setting
     units = env.get("UNITS", "metric")
     if units not in UNITS:
         raise SystemExit(f"UNITS={units!r} must be metric or imperial")
+    # `;` between cities: a comma already belongs to the place ("Paris, Texas")
+    cities = tuple(c.strip() for c in env.get("CITY", "Vienna").split(";") if c.strip())
+    if not 1 <= len(cities) <= MAX_CITIES:
+        raise SystemExit(
+            f"CITY needs 1 to {MAX_CITIES} cities separated by ;, for example Vienna; Graz"
+        )
     return Settings(
         token=token,
         chat_id=chat_id,
-        city=env.get("CITY", "Vienna"),
+        cities=cities,
         post_at=post_at,
         tz=tz,
         units=units,
-        data_dir=Path(env.get("DATA_DIR", "data")),
+        answer_bot=env.get("ANSWER_BOT", "").strip().lstrip("@"),
     )
 
 

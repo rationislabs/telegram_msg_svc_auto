@@ -94,6 +94,11 @@ def test_proofread_wording():
     assert "despertarse primero" in i18n.S["es"]["help"]
 
 
+def test_help_shows_a_list_of_cities():
+    for lang in i18n.LANGS:
+        assert "; " in i18n.S[lang]["help"], lang
+
+
 def test_week_day():
     assert i18n.week_day(date(2026, 10, 12), "en") == "Mon 12"
     assert i18n.week_day(date(2026, 10, 12), "de") == "Mo 12."

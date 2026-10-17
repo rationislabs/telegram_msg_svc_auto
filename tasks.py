@@ -76,19 +76,8 @@ def chat_id(c):
 
 @task(name="send-now")
 def send_now(c):
-    """Post today's forecast to CHAT_ID now (does not touch the daily schedule)."""
+    """Post today's forecast for every CITY to CHAT_ID now."""
     c.run("uv run python -m tgforecast send-now", env=_dotenv(), pty=True)
-
-
-@task
-def up(c):
-    """Build and start the bot container."""
-    c.run("docker compose up -d --build")
-
-
-@task
-def down(c):
-    c.run("docker compose down")
 
 
 @task
