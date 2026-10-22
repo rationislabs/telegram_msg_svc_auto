@@ -125,3 +125,19 @@ def test_day_chart_titles_come_from_the_tables(fx, monkeypatch):
         "Température (°C)",
         "Risque de pluie (%)",
     ]
+
+
+def test_a_failed_render_leaves_no_figure_behind():
+    # The answer bot runs for days: every figure left open is memory that never comes back.
+    import matplotlib.pyplot as plt
+
+    bad = {"hours": [0, 1, 2], "temp": [1.0], "rain": [], "prob": []}
+    for render in (
+        lambda: chart.render(bad, "Bad", "metric"),
+        lambda: chart.week_render({"days": [1, 2], "max": [1.0]}, "Bad", "metric"),
+    ):
+        try:
+            render()
+        except Exception:  # noqa: BLE001 — any failure: what matters is the cleanup
+            pass
+        assert plt.get_fignums() == []

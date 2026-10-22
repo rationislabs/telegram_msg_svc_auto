@@ -5,6 +5,7 @@ recompresses it."""
 
 from __future__ import annotations
 
+import functools
 import io
 from datetime import date
 
@@ -78,6 +79,23 @@ def _figure(title: str):
     return fig, top, bottom
 
 
+def _closes_figures(render):
+    """Close every figure the render opened, also when it raises: the answer bot runs for days,
+    and pyplot keeps an open figure until it is closed. Concurrent renders are kept
+    apart by Answerer._chart_lock."""
+
+    @functools.wraps(render)
+    def wrapper(*args, **kwargs):
+        before = set(plt.get_fignums())
+        try:
+            return render(*args, **kwargs)
+        finally:
+            for n in set(plt.get_fignums()) - before:
+                plt.close(n)
+
+    return wrapper
+
+
 def _png(fig) -> bytes:
     fig.subplots_adjust(left=0.06, right=0.98, top=0.86, bottom=0.08, hspace=0.45)
     buf = io.BytesIO()
@@ -86,6 +104,7 @@ def _png(fig) -> bytes:
     return buf.getvalue()
 
 
+@_closes_figures
 def render(
     data: dict, title: str, units: str, mark_hour: float | None = None, lang: str = "en"
 ) -> bytes:
@@ -130,6 +149,7 @@ def week_series(forecast: dict) -> dict:
     }
 
 
+@_closes_figures
 def week_render(data: dict, title: str, units: str, lang: str = "en") -> bytes:
     """Each day's low–high as a bar with both values labelled; rain chance below."""
     u = UNIT_LABELS[units]["temp"]

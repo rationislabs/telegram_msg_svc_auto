@@ -111,6 +111,13 @@ def fixtures_answer(c):
 
 
 @task
+def profile(c):
+    """Set the answer bot's command menus and descriptions (ANSWER_BOT_TOKEN from .env). Run once
+    after changing them; the bot no longer sets them on every start."""
+    c.run("uv run python -m tgforecast profile", env=_dotenv(), pty=True)
+
+
+@task
 def answer(c):
     """Run the answer bot locally with long polling (ANSWER_BOT_TOKEN from .env). This removes
     the Render webhook; restart the Render service afterwards (Manual Deploy → Restart service) to set it again."""

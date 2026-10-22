@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 import httpx
 import pytest
 import respx
-from telegram.error import BadRequest, Forbidden, RetryAfter
+from telegram.error import BadRequest, Forbidden, RetryAfter, TimedOut
 
 from tgforecast import bot, config
 
@@ -70,12 +70,14 @@ def morning(fx) -> datetime:
 
 @pytest.fixture(autouse=True)
 def no_waiting(monkeypatch):
-    waits = []
+    waits, now = [], [0.0]
 
     async def sleep(seconds):
         waits.append(seconds)
+        now[0] += seconds  # the retry budget is on the clock
 
     monkeypatch.setattr(bot.asyncio, "sleep", sleep)
+    monkeypatch.setattr(bot, "_now", lambda: now[0])
     return waits
 
 
@@ -157,12 +159,80 @@ async def test_flood_limit_waits_as_told_then_posts(routes, fx, no_waiting, give
     assert no_waiting == [30.0] and [kind for kind, _ in fake.sent] == ["photo"]
 
 
+def todays(due: bool) -> str:
+    """Of daily.yml's two crons, the one that is (or is not) due today in Vienna at 07:00."""
+    now = datetime.now(UTC)
+    for cron in ("0 5 * * *", "0 6 * * *"):
+        if bot.due(cron, now, time(7, 0), TZ) is due:
+            return cron
+    raise AssertionError("one of the two crons is always due")
+
+
 def test_not_due_exits_without_touching_telegram(monkeypatch):
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:abc")
     monkeypatch.setenv("CHAT_ID", "-1")
-    monkeypatch.setenv("SCHEDULE", "0 12 * * *")  # 13:00 or 14:00 in Vienna, never 07:00
+    monkeypatch.setenv("SCHEDULE", todays(due=False))  # the other half of the summer/winter pair
     with respx.mock():  # any request would fail the test
         assert bot.main([]) == 0
+
+
+def test_a_schedule_that_can_never_match_post_at_fails_loudly(monkeypatch, capsys):
+    # POST_AT moved without new crons: green runs that never post would hide it.
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:abc")
+    monkeypatch.setenv("CHAT_ID", "-1")
+    monkeypatch.setenv("SCHEDULE", "0 12 * * *")  # 13:00 or 14:00 in Vienna, never 07:00
+    monkeypatch.setattr(bot, "wait_for_telegram", lambda token: pytest.fail("reached Telegram"))
+    assert bot.main([]) == 1
+    assert "SCHEDULE does not match POST_AT" in capsys.readouterr().err
+
+
+def test_a_rerun_of_a_scheduled_job_posts_nothing_and_says_so(monkeypatch, capsys):
+    # "Re-run failed jobs" would post again to the cities that already went out.
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:abc")
+    monkeypatch.setenv("CHAT_ID", "-1")
+    monkeypatch.setenv("SCHEDULE", todays(due=True))
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "2")
+
+    def no_telegram(token):
+        raise AssertionError("a re-run reached Telegram")
+
+    monkeypatch.setattr(bot, "wait_for_telegram", no_telegram)
+    # Not green: a first attempt that failed before posting would leave nothing posted.
+    assert bot.main([]) == 1
+    assert "Run workflow" in capsys.readouterr().err
+
+
+def test_the_retry_budget_counts_time_spent_in_requests_too():
+    # Ten-second timeouts are not waits, but they use up the job's 15 minutes all the same.
+    now = [0.0]
+    budget = bot._Budget(100, clock=lambda: now[0])
+    assert budget.take(10)
+    now[0] = 95  # slow requests, no waits
+    assert not budget.take(10)
+
+
+async def test_retries_share_one_budget_across_cities(routes, fx, no_waiting):
+    routes["forecast"].mock(return_value=httpx.Response(503))
+    fake = FakeBot()
+    cities = "; ".join(["Vienna"] * 10)
+    assert await run(fake, settings_for(CITY=cities), morning(fx)) is False
+    assert sum(no_waiting) <= bot.RUN_RETRY_BUDGET
+    assert [kw["text"] for _, kw in fake.sent] == [bot.NOTICE.format(city="Vienna")] * 10
+
+
+async def test_a_send_that_never_connected_is_not_counted_as_sent(routes, fx):
+    # A connect or pool timeout: the upload never left, so the post is lost.
+    err = TimedOut()
+    err.__cause__ = httpx.ConnectTimeout("no route")
+    fake = FakeBot(err)
+    assert await run(fake, settings_for(), morning(fx)) is False
+
+
+async def test_a_timed_out_send_counts_as_sent(routes, fx, caplog):
+    # Telegram often delivers a photo whose upload timed out: a retry would post it twice.
+    fake = FakeBot(TimedOut())
+    assert await run(fake, settings_for(), morning(fx)) is True
+    assert "timed out" in caplog.text
 
 
 def test_rejected_token_stops_cleanly(monkeypatch, capsys, caplog):

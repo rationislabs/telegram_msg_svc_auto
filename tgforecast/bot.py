@@ -28,6 +28,7 @@ from telegram.error import (  # noqa: E402
     NetworkError,
     RetryAfter,
     TelegramError,
+    TimedOut,
 )
 
 from . import chart, config, summary  # noqa: E402
@@ -36,6 +37,7 @@ from .config import Settings  # noqa: E402
 
 TRIES = 3
 RETRY_WAIT = 60  # seconds between tries; the Actions job has a timeout of its own
+RUN_RETRY_BUDGET = 480  # seconds of retry waits for the whole run, of daily.yml's 15 minutes
 NOTICE = "No forecast for {city} this morning: Open-Meteo didn't answer. Next try tomorrow."
 
 log = logging.getLogger(__name__)
@@ -52,6 +54,13 @@ def due(schedule: str, now: datetime, post_at: time, tz: ZoneInfo) -> bool:
     scheduled = now.astimezone(UTC).replace(hour=hour, minute=minute, second=0, microsecond=0)
     local = scheduled.astimezone(tz)
     return (local.hour, local.minute) == (post_at.hour, post_at.minute)
+
+
+def _paired(schedule: str, now: datetime, post_at: time, tz: ZoneInfo) -> bool:
+    """A cron that is not due today is fine when it is POST_AT's summer/winter partner: one hour
+    off. Anything else means POST_AT or TZ changed and the crons were not moved with it."""
+    shifted = [(datetime.combine(now.date(), post_at) + timedelta(hours=h)).time() for h in (-1, 1)]
+    return any(due(schedule, now, s, tz) for s in shifted)
 
 
 def descriptions(settings: Settings) -> tuple[str, str]:
@@ -73,8 +82,26 @@ def _seconds(retry_after) -> float:
     return retry_after.total_seconds() if isinstance(retry_after, timedelta) else float(retry_after)
 
 
-async def _forecast(http: httpx.AsyncClient, city: str, settings: Settings, day):
-    """Place, forecast and caption, tried TRIES times. A city that doesn't exist isn't retried."""
+_now = time_module.monotonic
+
+
+class _Budget:
+    """Time for retries in the whole run, on the clock: ten cities in an outage must not
+    outlast the job, or the last ones get neither a post nor the notice. The waits and the
+    slow requests between them both count."""
+
+    def __init__(self, seconds: float, clock=None) -> None:
+        self.clock = clock or _now
+        self.until = self.clock() + seconds
+
+    def take(self, seconds: float) -> bool:
+        """True if a wait of `seconds` still ends within the budget."""
+        return self.clock() + seconds <= self.until
+
+
+async def _forecast(http: httpx.AsyncClient, city: str, settings: Settings, day, budget: _Budget):
+    """Place, forecast and caption, tried TRIES times while the run's retry budget lasts. A city
+    that doesn't exist isn't retried."""
     for n in range(1, TRIES + 1):
         try:
             place = await fc.geocode(http, city)
@@ -83,7 +110,7 @@ async def _forecast(http: httpx.AsyncClient, city: str, settings: Settings, day)
         except fc.NotFound:
             raise
         except Exception as e:  # noqa: BLE001 — an outage or a malformed answer: retry
-            if n == TRIES:
+            if n == TRIES or not budget.take(RETRY_WAIT):
                 raise
             log.warning("%s, try %d: %s; again in %d s", city, n, e, RETRY_WAIT)
             await asyncio.sleep(RETRY_WAIT)
@@ -106,11 +133,13 @@ async def _send(tg, settings: Settings, text: str, png: bytes | None) -> None:
             await asyncio.sleep(_seconds(e.retry_after))
 
 
-async def post(tg, http: httpx.AsyncClient, settings: Settings, city: str, now: datetime) -> bool:
+async def post(
+    tg, http: httpx.AsyncClient, settings: Settings, city: str, now: datetime, budget: _Budget
+) -> bool:
     """Today's post for one city. True when it went out."""
     day = now.date()
     try:
-        place, forecast, text = await _forecast(http, city, settings, day)
+        place, forecast, text = await _forecast(http, city, settings, day, budget)
     except fc.NotFound:
         log.error("CITY %r: no such place; check the spelling", city)
         return False
@@ -133,6 +162,13 @@ async def post(tg, http: httpx.AsyncClient, settings: Settings, city: str, now: 
         png = None
     try:
         await _send(tg, settings, text, png)
+    except TimedOut as e:
+        if isinstance(e.__cause__, httpx.ConnectTimeout | httpx.PoolTimeout):
+            log.error("%s: could not reach Telegram (%s)", place.label, type(e.__cause__).__name__)
+            return False
+        # Sent but unanswered: the upload often lands anyway, and a retry would post it twice.
+        log.warning("%s: Telegram timed out; counted as posted", place.label)
+        return True
     except (BadRequest, Forbidden) as e:  # BadRequest subclasses NetworkError: catch it first
         log.error(
             "Telegram refused the post (%s). Check CHAT_ID, and that the bot may post there.", e
@@ -153,7 +189,8 @@ async def run(tg, http: httpx.AsyncClient, settings: Settings, now: datetime) ->
         await tg.set_my_description(long)
     except TelegramError as e:  # the profile text must not cost the posts
         log.warning("description not set: %s", type(e).__name__)
-    results = [await post(tg, http, settings, city, now) for city in settings.cities]
+    budget = _Budget(RUN_RETRY_BUDGET)
+    results = [await post(tg, http, settings, city, now, budget) for city in settings.cities]
     return all(results)
 
 
@@ -195,9 +232,25 @@ def main(argv: list[str]) -> int:
     logging.getLogger("httpx").setLevel(logging.WARNING)  # its INFO lines carry the token URL
     settings = config.load()
     schedule = os.environ.get("SCHEDULE", "")
-    if not due(schedule, datetime.now(UTC), settings.post_at, settings.tz):
+    now = datetime.now(UTC)
+    if not due(schedule, now, settings.post_at, settings.tz):
+        if not _paired(schedule, now, settings.post_at, settings.tz):
+            print(
+                f"SCHEDULE does not match POST_AT: cron {schedule!r} is never {settings.post_at}"
+                f" in {settings.tz}; give daily.yml new hours",
+                file=sys.stderr,
+            )
+            return 1
         log.info("cron %r is not %s in %s: nothing to do", schedule, settings.post_at, settings.tz)
         return 0
+    if schedule and os.environ.get("GITHUB_RUN_ATTEMPT", "1") != "1":
+        # A re-run would post the cities that went out the first time again.
+        print(
+            "Re-runs of a scheduled post never post. To post now, use Run workflow"
+            " (every city is posted again).",
+            file=sys.stderr,
+        )
+        return 1
     try:
         wait_for_telegram(settings.token)
         return 0 if asyncio.run(_main(settings)) else 1

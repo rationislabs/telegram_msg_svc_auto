@@ -9,7 +9,6 @@ import httpx
 import pytest
 from telegram.error import Forbidden, InvalidToken
 from telegram.ext import Application, MessageHandler
-from telegram.ext._utils import webhookhandler
 
 from tgforecast import answer, chart, config, i18n
 from tgforecast.answer import Answerer, Reply, Throttle, TTLCache
@@ -309,15 +308,67 @@ async def test_handle_survives_telegram_refusing_the_reply(fx, caplog):
     assert "Forbidden" in caplog.text
 
 
-async def test_on_message_reads_the_update(fx):
+async def test_handle_global_limit_covers_every_chat(fx):
+    # Many accounts at once: the per-chat limit never trips, the app-wide one does.
     bot = FakeBot()
     async with httpx.AsyncClient() as http:
-        update = SimpleNamespace(
-            effective_message=SimpleNamespace(
-                text="/hilfe", chat_id=5, chat=SimpleNamespace(type="private")
-            ),
-            effective_user=SimpleNamespace(language_code="en"),
-        )
+        data = data_for(http, fx)
+        data["everyone"] = Throttle(limit=3, window=60, chats=1)
+        for chat in range(1, 6):
+            await answer.handle(bot, data, chat, "/help", "en", True)
+    texts = [kw["text"] for _, kw in bot.sent]
+    assert texts[:3] == [i18n.help_text("en")] * 3
+    assert texts[3:] == [i18n.t("en", "throttled")] * 2
+
+
+async def test_a_busy_reply_does_not_use_up_the_chats_own_limit(fx):
+    # The app-wide limit answered "busy": that question must not count against the chat too.
+    bot = FakeBot()
+    now = [0.0]
+    async with httpx.AsyncClient() as http:
+        data = data_for(http, fx)
+        data["throttle"] = Throttle(limit=1, window=60, clock=lambda: now[0])
+        data["everyone"] = Throttle(limit=1, window=10, chats=1, clock=lambda: now[0])
+        await answer.handle(bot, data, 1, "/help", "en", True)  # uses everyone's one
+        now[0] = 1
+        await answer.handle(bot, data, 2, "/help", "en", True)  # busy
+        now[0] = 11  # everyone's minute is over, chat 2's is not
+        await answer.handle(bot, data, 2, "/help", "en", True)
+    texts = [kw["text"] for _, kw in bot.sent]
+    assert texts == [i18n.help_text("en"), i18n.t("en", "throttled"), i18n.help_text("en")]
+
+
+def update_at(date, text="/hilfe"):
+    return SimpleNamespace(
+        effective_message=SimpleNamespace(
+            text=text, chat_id=5, chat=SimpleNamespace(type="private"), date=date
+        ),
+        effective_user=SimpleNamespace(language_code="en"),
+    )
+
+
+async def test_on_message_drops_only_long_stale_updates(fx, caplog):
+    from datetime import UTC, datetime, timedelta
+
+    caplog.set_level(logging.INFO, logger="tgforecast")
+    bot = FakeBot()
+    async with httpx.AsyncClient() as http:
+        context = SimpleNamespace(bot=bot, application=SimpleNamespace(bot_data=data_for(http, fx)))
+        # The message that woke the sleeping free host arrives after a cold start: answered.
+        await answer.on_message(update_at(datetime.now(UTC) - timedelta(seconds=120)), context)
+        assert len(bot.sent) == 1
+        old = datetime.now(UTC) - timedelta(seconds=answer.MAX_UPDATE_AGE + 60)
+        await answer.on_message(update_at(old), context)
+    assert len(bot.sent) == 1
+    assert "stale" in caplog.text
+
+
+async def test_on_message_reads_the_update(fx):
+    from datetime import UTC, datetime
+
+    bot = FakeBot()
+    async with httpx.AsyncClient() as http:
+        update = update_at(datetime.now(UTC))
         context = SimpleNamespace(bot=bot, application=SimpleNamespace(bot_data=data_for(http, fx)))
         await answer.on_message(update, context)
     assert bot.sent[0][1]["text"] == i18n.help_text("de")
@@ -355,7 +406,7 @@ def test_menus_per_language():
 
 @pytest.fixture
 def restore_logging():
-    names = ("httpx", "telegram", webhookhandler._LOGGER.name)
+    names = ("httpx", "telegram")
     saved = [(lg, lg.level, lg.filters[:]) for lg in map(logging.getLogger, names)]
     yield
     for lg, level, filters in saved:
@@ -367,25 +418,6 @@ def test_configure_logging_quiets_the_libraries_that_log_the_token(restore_loggi
     answer.configure_logging()
     for name in ("httpx", "telegram"):
         assert logging.getLogger(name).level == logging.WARNING
-
-
-def test_configure_logging_drops_the_raw_update_record_only(restore_logging, caplog):
-    answer.configure_logging()
-    lg = webhookhandler._LOGGER
-    # the format string python-telegram-bot uses when Update.de_json fails
-    lg.critical(
-        "Something went wrong processing the data received from Telegram. "
-        "Received data was *not* processed! Received data was: %r",
-        {"message": {"text": "Graz secret"}},
-    )
-    lg.critical("something else broke")
-    # the polling path (telegram/ext/_updater.py) carries no data and stays visible
-    lg.critical(
-        "Something went wrong processing the data received from Telegram. "
-        "Received data was *not* processed!"
-    )
-    assert "Graz" not in caplog.text and "Received data was:" not in caplog.text
-    assert "something else broke" in caplog.text and "*not* processed!" in caplog.text
 
 
 class FakeApp:
@@ -412,22 +444,39 @@ def fake_main(monkeypatch):
 
 
 def test_main_serves_the_webhook_on_render(fake_main, monkeypatch):
+    # Our own webhook server (tgforecast.webhook), not python-telegram-bot's: it checks the
+    # secret and the size before reading a body.
     monkeypatch.setenv("RENDER_EXTERNAL_URL", "https://answer.onrender.com")
     monkeypatch.setenv("WEBHOOK_SECRET", "s3cret")
     monkeypatch.setenv("PORT", "8123")
-    assert answer.main() == 0
+    served = []
+
+    async def serve(app, **kw):
+        # Render stops the service with SIGTERM: uvicorn restores the handler it found and
+        # re-raises, so the default one would kill the process before PTB shuts down.
+        import signal
+
+        assert signal.getsignal(signal.SIGTERM) not in (signal.SIG_DFL, None)
+        served.append((app, kw))
+
+    monkeypatch.setattr(answer.webhook, "serve", serve)
+    import signal
+
+    before = signal.getsignal(signal.SIGTERM)
+    try:
+        assert answer.main() == 0
+    finally:
+        signal.signal(signal.SIGTERM, before)  # main() sets it for the whole process
     secret = config.load_answer().secret
-    assert fake_main.calls == [
+    assert fake_main.calls == []
+    assert served == [
         (
-            "webhook",
+            fake_main,
             {
-                "listen": "0.0.0.0",
                 "port": 8123,
-                "url_path": "telegram",
-                "webhook_url": "https://answer.onrender.com/telegram",
-                "secret_token": secret,
-                "allowed_updates": ["message"],
-                "drop_pending_updates": False,
+                "url": "https://answer.onrender.com/telegram",
+                "secret": secret,
+                "path": "telegram",
             },
         )
     ]
@@ -495,21 +544,39 @@ def test_descriptions_per_language_fit_telegram():
         assert "<" not in short + long  # Telegram shows descriptions as plain text
 
 
-async def test_start_sets_menus_and_descriptions_per_language():
-    calls = set()
+class ProfileBot:
+    def __init__(self):
+        self.calls = set()
 
-    class Bot:
-        async def set_my_commands(self, commands, language_code=None):
-            calls.add(("commands", language_code))
+    async def set_my_commands(self, commands, language_code=None):
+        self.calls.add(("commands", language_code))
 
-        async def set_my_description(self, description, language_code=None):
-            calls.add(("description", language_code))
+    async def set_my_description(self, description, language_code=None):
+        self.calls.add(("description", language_code))
 
-        async def set_my_short_description(self, short_description, language_code=None):
-            calls.add(("short", language_code))
+    async def set_my_short_description(self, short_description, language_code=None):
+        self.calls.add(("short", language_code))
 
-    app = SimpleNamespace(bot=Bot(), bot_data={})
+
+async def test_set_profile_sets_menus_and_descriptions_per_language():
+    bot = ProfileBot()
+    await answer.set_profile(bot)
+    codes = (None, "de", "it", "fr", "es")
+    assert bot.calls == {(k, c) for k in ("commands", "description", "short") for c in codes}
+
+
+async def test_a_cold_start_makes_no_profile_calls(monkeypatch):
+    # 15 rate-limited calls on every wake of the free host would delay the waiting answer.
+    monkeypatch.delenv("SET_PROFILE", raising=False)
+    app = SimpleNamespace(bot=ProfileBot(), bot_data={})
     await answer._start(app)
     await app.bot_data["http"].aclose()
-    codes = (None, "de", "it", "fr", "es")
-    assert calls == {(k, c) for k in ("commands", "description", "short") for c in codes}
+    assert app.bot.calls == set()
+
+
+async def test_set_profile_on_start_when_asked(monkeypatch):
+    monkeypatch.setenv("SET_PROFILE", "1")
+    app = SimpleNamespace(bot=ProfileBot(), bot_data={})
+    await answer._start(app)
+    await app.bot_data["http"].aclose()
+    assert len(app.bot.calls) == 15

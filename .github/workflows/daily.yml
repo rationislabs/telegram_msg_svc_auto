@@ -1,7 +1,7 @@
 name: Daily post
 # POST_AT 07:00 in Europe/Vienna is 05:00 UTC in summer and 06:00 UTC in winter. Both run; only
 # the one whose time is POST_AT posts (tgforecast.bot.due). A new POST_AT or TZ needs new hours.
-# Off when not wanted: gh workflow disable daily.yml (and enable to turn it back on).
+# Disabled on GitHub by default: gh workflow enable daily.yml turns it on (disable to stop).
 on:
   schedule:
     - cron: "0 5 * * *"
@@ -11,12 +11,18 @@ on:
 permissions:
   contents: read
 
+concurrency: # a manual run never overlaps the scheduled one
+  group: daily-post
+  cancel-in-progress: false
+
 jobs:
   post:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           enable-cache: true

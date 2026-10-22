@@ -9,6 +9,7 @@ import asyncio
 import html
 import logging
 import os
+import signal
 import sys
 import time
 from collections import OrderedDict, deque
@@ -19,13 +20,12 @@ from datetime import UTC, date, datetime, timedelta
 os.environ.setdefault("PTB_TIMEDELTA", "1")
 
 import httpx  # noqa: E402
-from telegram import LinkPreviewOptions  # noqa: E402
+from telegram import Bot, LinkPreviewOptions  # noqa: E402
 from telegram.error import InvalidToken, TelegramError  # noqa: E402
 from telegram.ext import Application, ContextTypes, MessageHandler, filters  # noqa: E402
-from telegram.ext._utils import webhookhandler  # noqa: E402
 
 from . import bot as stage1  # noqa: E402
-from . import chart, config, i18n, summary  # noqa: E402
+from . import chart, config, i18n, summary, webhook  # noqa: E402
 from . import forecast as fc  # noqa: E402
 from .ask import Ask, parse  # noqa: E402
 
@@ -66,6 +66,12 @@ class _Chat:
     noted: bool = False
 
 
+GLOBAL_PER_MINUTE = 60  # questions per minute from everyone together: Open-Meteo's free quota
+# Seconds. The message that wakes the sleeping free host arrives after a cold start of a
+# minute or more and must still be answered; only a real backlog is dropped.
+MAX_UPDATE_AGE = 300
+
+
 class Throttle:
     """`limit` questions per rolling `window` seconds per chat: one note, then silence."""
 
@@ -91,6 +97,11 @@ class Throttle:
             return "quiet"
         chat.noted = True
         return "note"
+
+    def refund(self, chat_id: int) -> None:
+        """Give back the last question counted for this chat: it was never answered."""
+        if (chat := self._chats.get(chat_id)) and chat.stamps:
+            chat.stamps.pop()
 
 
 class Answerer:
@@ -212,7 +223,11 @@ async def _answer(bot, data: dict, chat_id: int, ask: Ask) -> bool:
         gate = data["throttle"].check(chat_id)
         if gate == "quiet":
             return False
-        if gate == "note":
+        # Everyone together: many accounts at once never trip the per-chat limit.
+        busy = gate == "ok" and "everyone" in data and data["everyone"].check(0) != "ok"
+        if busy:  # the chat's own limit counts answered questions only
+            data["throttle"].refund(chat_id)
+        if gate == "note" or busy:
             reply = Reply(i18n.t(ask.lang, "throttled"), status="throttled")
         else:
             reply = await data["answerer"].reply(ask)
@@ -235,6 +250,9 @@ async def _deliver(bot, chat_id: int, kind: str, reply: Reply) -> None:
 async def on_message(update, context: ContextTypes.DEFAULT_TYPE) -> None:
     msg = update.effective_message
     if msg is None or not msg.text:
+        return
+    if (datetime.now(UTC) - msg.date).total_seconds() > MAX_UPDATE_AGE:
+        log.info("dropped a stale update")  # minutes late is noise; a backlog starves the rest
         return
     user = update.effective_user
     await handle(
@@ -281,18 +299,43 @@ def descriptions() -> list[tuple[str | None, str, str]]:
 
 async def _start(app: Application) -> None:
     http = httpx.AsyncClient()
-    app.bot_data.update(http=http, answerer=Answerer(http), throttle=Throttle())
+    app.bot_data.update(
+        http=http,
+        answerer=Answerer(http),
+        throttle=Throttle(),
+        everyone=Throttle(limit=GLOBAL_PER_MINUTE, chats=1),
+    )
+    # The profile rarely changes and its calls are rate-limited: not on every cold start of the
+    # free host, while the message that woke it waits. `uv run inv profile` sets it.
+    if os.environ.get("SET_PROFILE") == "1":
+        await set_profile(app.bot)
+
+
+async def set_profile(bot) -> None:
+    """The command menus and descriptions, per app language."""
     for code, commands in menus():
         try:
-            await app.bot.set_my_commands(commands, language_code=code)
+            await bot.set_my_commands(commands, language_code=code)
         except TelegramError as e:
             log.warning("command menu %s not set: %s", code or "default", type(e).__name__)
     for code, short, long in descriptions():
         try:
-            await app.bot.set_my_short_description(short, language_code=code)
-            await app.bot.set_my_description(long, language_code=code)
+            await bot.set_my_short_description(short, language_code=code)
+            await bot.set_my_description(long, language_code=code)
         except TelegramError as e:
             log.warning("description %s not set: %s", code or "default", type(e).__name__)
+
+
+async def _profile(token: str) -> None:
+    async with Bot(token) as bot:
+        await set_profile(bot)
+
+
+def profile() -> int:
+    """`python -m tgforecast profile`: set the answer bot's menus and descriptions once."""
+    configure_logging()
+    asyncio.run(_profile(config.load_answer().token))
+    return 0
 
 
 async def _stop(app: Application) -> None:
@@ -301,20 +344,17 @@ async def _stop(app: Application) -> None:
 
 
 def build(settings: config.AnswerSettings) -> Application:
-    app = Application.builder().token(settings.token).post_init(_start).post_shutdown(_stop).build()
+    app = (
+        Application.builder()
+        .token(settings.token)
+        .concurrent_updates(4)  # one slow city must not hold everyone else's answer
+        .post_init(_start)
+        .post_shutdown(_stop)
+        .build()
+    )
     app.add_handler(MessageHandler(filters.TEXT, on_message))
     app.add_error_handler(on_error)
     return app
-
-
-class _DropRawUpdate(logging.Filter):
-    """python-telegram-bot logs the whole update, message text included, when it can't parse one."""
-
-    def filter(self, record: logging.LogRecord) -> bool:
-        return not str(record.msg).endswith("Received data was: %r")
-
-
-_DROP_RAW_UPDATE = _DropRawUpdate()
 
 
 def configure_logging() -> None:
@@ -323,7 +363,6 @@ def configure_logging() -> None:
     )
     for name in ("httpx", "telegram"):  # their INFO lines carry the token URL
         logging.getLogger(name).setLevel(logging.WARNING)
-    webhookhandler._LOGGER.addFilter(_DROP_RAW_UPDATE)
 
 
 def main() -> int:
@@ -333,14 +372,18 @@ def main() -> int:
         stage1.wait_for_telegram(settings.token)
         app = build(settings)
         if settings.webhook_url:
-            app.run_webhook(
-                listen="0.0.0.0",
-                port=settings.port,
-                url_path=WEBHOOK_PATH,
-                webhook_url=f"{settings.webhook_url}/{WEBHOOK_PATH}",
-                secret_token=settings.secret,
-                allowed_updates=["message"],
-                drop_pending_updates=False,  # the message that woke the service gets its answer
+            # Render stops the service with SIGTERM. uvicorn restores the handler it found and
+            # raises the signal again: with the default one the process dies before PTB has
+            # answered what it already accepted. A no-op lets serve() shut down in order.
+            signal.signal(signal.SIGTERM, lambda *_: None)
+            asyncio.run(
+                webhook.serve(
+                    app,
+                    port=settings.port,
+                    url=f"{settings.webhook_url}/{WEBHOOK_PATH}",
+                    secret=settings.secret,
+                    path=WEBHOOK_PATH,
+                )
             )
         else:
             log.info("no RENDER_EXTERNAL_URL: long polling (this removes any webhook)")

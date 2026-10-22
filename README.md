@@ -85,15 +85,17 @@ uv run inv fixtures  # re-record the Open-Meteo responses the tests use
 A second bot anyone can ask: `/now Graz`, `/week Paris, Texas`, or just a city in a private chat.
 Several at once, separated by `;`: `/now Vienna; Graz` answers each, up to 5. Add `°F` for
 Fahrenheit; at the end it counts for every city. Its menu lists the commands, and its
-description says what it does before anyone presses Start.
+description says what it does before anyone presses Start: set both once with
+`uv run inv profile` (not on every start, so a cold start answers sooner).
 
 It replies in English, German, Italian, French or Spanish: a local command (`/jetzt`, `/woche`,
 `/ora`, `/settimana`, `/maintenant`, `/semaine`, `/ahora`, `/semana`) picks the language,
 otherwise the Telegram app's language does.
 
 Nothing about visitors is stored: no files, no database, and the logs name only the command and
-the outcome. A 15-minute forecast cache and a limit of 10 questions a minute per chat live in
-memory.
+the outcome. A 15-minute forecast cache, a limit of 10 questions a minute per chat and 60 a
+minute for everyone together live in memory. Messages older than a minute are skipped, and the
+webhook refuses a request without the secret header, or over 1 MB, before reading it.
 
 ### Hosting on Render (free)
 

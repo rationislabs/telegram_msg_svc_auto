@@ -31,3 +31,7 @@ def test_exactly_one_cron_is_due_every_day_of_the_year():
             due.append(bot.due(cron, now, time(7, 0), tz))
         assert due.count(True) == 1, day
         day += timedelta(days=1)
+
+
+def test_a_manual_run_never_overlaps_the_scheduled_one():
+    assert "concurrency:" in WORKFLOW and "group: daily-post" in WORKFLOW
