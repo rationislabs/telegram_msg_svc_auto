@@ -120,3 +120,5 @@ Polling removes the Render webhook. Afterwards, restart the service in Render's 
 [Weather data by Open-Meteo.com](https://open-meteo.com/), licensed
 [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Place lookup uses
 [GeoNames](https://www.geonames.org/) through Open-Meteo's geocoding API.
+
+This project was built with AI assistance.
